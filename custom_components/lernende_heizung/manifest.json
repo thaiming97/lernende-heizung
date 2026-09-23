@@ -1,0 +1,14 @@
+{
+  "domain": "lernende_heizung",
+  "name": "Lernende Heizung",
+  "codeowners": ["@thaiming97"],
+  "config_flow": true,
+  "dependencies": [],
+  "after_dependencies": ["weather", "mqtt", "zha"],
+  "documentation": "https://github.com/thaiming97/lernende-heizung",
+  "integration_type": "hub",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/thaiming97/lernende-heizung/issues",
+  "requirements": ["numpy"],
+  "version": "0.1.0"
+}

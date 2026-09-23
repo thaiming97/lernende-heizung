@@ -1,0 +1,148 @@
+{
+  "config": {
+    "abort": {"already_configured": "Die Lernende Heizung ist bereits eingerichtet. Weitere Zonen über „Konfigurieren“ hinzufügen."},
+    "error": {
+      "invalid_schedule": "Zeitplan nicht verstanden. Beispiel: Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30",
+      "name_required": "Bitte einen Namen angeben.",
+      "name_exists": "Diese Zone gibt es schon.",
+      "trv_required": "Mindestens einen Thermostatkopf auswählen."
+    },
+    "step": {
+      "user": {
+        "title": "Lernende Heizung – Wohnung",
+        "description": "Vorschläge sind schon eingetragen und können übernommen werden. Alles ist später änderbar.",
+        "data": {
+          "weather_entity": "Wetterdienst (z. B. DWD) – Außentemperatur und Vorhersage",
+          "outdoor_sensor": "Eigener Außenfühler (optional, Versatz wird automatisch gelernt)",
+          "sun_sensor": "Helligkeitssensor draußen (optional, lx)",
+          "heating_limit": "Heizgrenze (24-h-Mittel außen, darüber Sommerbetrieb)"
+        }
+      },
+      "zone": {
+        "title": "Zone",
+        "description": "Eine Zone = Räume, die gemeinsam geregelt werden. Mehrere Heizkörper einer Zone werden gleich weit geöffnet.",
+        "data": {
+          "name": "Name",
+          "temp_sensor": "Raumtemperatursensor",
+          "temp_sensor_2": "Zweiter Sensor (optional, ersetzt Sonnenspitzen am Hauptsensor)",
+          "trvs": "Thermostatköpfe",
+          "windows": "Fenster-/Türkontakte (optional)",
+          "comfort_temp": "Komforttemperatur",
+          "eco_delta": "Absenkung außerhalb der Komfortzeiten",
+          "away_temp": "Temperatur bei Abwesenheit/Urlaub",
+          "schedule": "Komfortzeiten",
+          "radiator_kw": "Heizkörper-Nennleistung gesamt (Startwert)",
+          "area_m2": "Fläche der Zone (Startwert)"
+        },
+        "data_description": {
+          "schedule": "z. B. „Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30“ oder „immer“",
+          "radiator_kw": "Grob reicht: Typ 11 ≈ 0,8 kW je Meter, Typ 21 ≈ 1,2, Typ 22 ≈ 1,6 (60 cm hoch). Das Modell lernt den echten Wert.",
+          "temp_sensor_2": "Z. B. Küchensensor, wenn der Hauptsensor zeitweise direkte Sonne abbekommt."
+        }
+      },
+      "more": {
+        "title": "Weitere Zone?",
+        "menu_options": {"zone": "Weitere Zone hinzufügen", "finish": "Fertig"}
+      }
+    }
+  },
+  "options": {
+    "error": {
+      "invalid_schedule": "Zeitplan nicht verstanden. Beispiel: Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30",
+      "name_required": "Bitte einen Namen angeben.",
+      "name_exists": "Diese Zone gibt es schon.",
+      "trv_required": "Mindestens einen Thermostatkopf auswählen."
+    },
+    "step": {
+      "init": {
+        "title": "Einstellungen",
+        "menu_options": {
+          "general": "Wohnung (Wetter, Außenfühler, Sonne)",
+          "supply": "Vorlauffühler",
+          "add_zone": "Zone hinzufügen",
+          "edit_zone": "Zone bearbeiten",
+          "remove_zone": "Zone entfernen"
+        }
+      },
+      "general": {
+        "title": "Wohnung",
+        "data": {
+          "weather_entity": "Wetterdienst (z. B. DWD)",
+          "outdoor_sensor": "Eigener Außenfühler (optional)",
+          "sun_sensor": "Helligkeitssensor (optional)",
+          "heating_limit": "Heizgrenze"
+        }
+      },
+      "supply": {
+        "title": "Vorlauffühler (optional)",
+        "description": "Temperaturfühler am Vorlaufrohr eines Heizkörpers. Er zeigt den Vorlauf nur, wenn dieses Ventil offen ist – deshalb die Zone angeben, zu der der Heizkörper gehört.",
+        "data": {"supply_sensor": "Rohrfühler", "supply_zone": "Heizkörper gehört zur Zone"}
+      },
+      "add_zone": {
+        "title": "Zone hinzufügen",
+        "data": {
+          "name": "Name", "temp_sensor": "Raumtemperatursensor", "temp_sensor_2": "Zweiter Sensor (optional)",
+          "trvs": "Thermostatköpfe", "windows": "Fenster-/Türkontakte (optional)", "comfort_temp": "Komforttemperatur",
+          "eco_delta": "Absenkung", "away_temp": "Abwesend/Urlaub", "schedule": "Komfortzeiten",
+          "radiator_kw": "Heizkörper-Nennleistung (Startwert)", "area_m2": "Fläche (Startwert)"
+        }
+      },
+      "zone_form": {
+        "title": "Zone bearbeiten",
+        "data": {
+          "name": "Name", "temp_sensor": "Raumtemperatursensor", "temp_sensor_2": "Zweiter Sensor (optional)",
+          "trvs": "Thermostatköpfe", "windows": "Fenster-/Türkontakte (optional)", "comfort_temp": "Komforttemperatur",
+          "eco_delta": "Absenkung", "away_temp": "Abwesend/Urlaub", "schedule": "Komfortzeiten",
+          "radiator_kw": "Heizkörper-Nennleistung (Startwert)", "area_m2": "Fläche (Startwert)"
+        }
+      },
+      "edit_zone": {"title": "Zone bearbeiten", "data": {"zone": "Zone"}},
+      "remove_zone": {"title": "Zone entfernen", "data": {"zone": "Zone"}}
+    }
+  },
+  "entity": {
+    "switch": {
+      "master": {"name": "Regelung"},
+      "active": {"name": "Aktiv regeln"}
+    },
+    "select": {
+      "presence": {"name": "Anwesenheit", "state": {"zuhause": "Zuhause", "abwesend": "Abwesend", "urlaub": "Urlaub"}}
+    },
+    "datetime": {"return_at": {"name": "Rückkehr aus dem Urlaub"}},
+    "binary_sensor": {"window": {"name": "Fenster offen"}, "preheat": {"name": "Vorheizen"}},
+    "climate": {
+      "zone": {
+        "state_attributes": {
+          "preset_mode": {"state": {"none": "Zeitplan", "comfort": "Komfort", "eco": "Absenkung", "away": "Abwesend"}}
+        }
+      }
+    },
+    "sensor": {
+      "outdoor": {"name": "Außentemperatur"},
+      "supply": {"name": "Vorlauf (geschätzt)"},
+      "sun": {"name": "Sonnenstrahlung"},
+      "valve": {"name": "Ventil"},
+      "power": {"name": "Heizleistung"},
+      "energy": {"name": "Heizenergie"},
+      "demand": {"name": "Wärmebedarf"},
+      "forecast_1h": {"name": "Temperatur in 1 h"},
+      "forecast_3h": {"name": "Temperatur in 3 h"},
+      "preheat_start": {"name": "Nächster Vorheizstart"},
+      "status": {
+        "name": "Status",
+        "state": {
+          "komfort": "Komfort", "absenkung": "Absenkung", "vorheizen": "Vorheizen", "fenster": "Fenster offen",
+          "frostschutz": "Frostschutz", "aus": "Aus", "rueckfall": "Sicherheitsbetrieb", "kein_sensor": "Sensor fehlt",
+          "sommer": "Sommer", "beobachten": "Nur beobachten"
+        }
+      },
+      "saving": {"name": "Einsparung durch Absenkung"},
+      "learning": {"name": "Lernfortschritt"},
+      "model_error": {"name": "Modellfehler"},
+      "time_constant": {"name": "Zeitkonstante Speichermasse"},
+      "heat_gain": {"name": "Heizwirkung bei voll offen"},
+      "heat_loss": {"name": "Wärmeverlust"},
+      "disturbance": {"name": "Störwärme (Personen, Geräte)"}
+    }
+  }
+}

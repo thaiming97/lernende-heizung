@@ -1,0 +1,250 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Already set up. Add more zones via Configure."
+    },
+    "error": {
+      "invalid_schedule": "Schedule not understood. Example: Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30",
+      "name_required": "Please enter a name.",
+      "name_exists": "Zone already exists.",
+      "trv_required": "Select at least one thermostat."
+    },
+    "step": {
+      "user": {
+        "title": "Learning heating – home",
+        "description": "Suggestions are pre-filled. Everything can be changed later.",
+        "data": {
+          "weather_entity": "Weather service (temperature and forecast)",
+          "outdoor_sensor": "Own outdoor sensor (optional, offset is learned)",
+          "sun_sensor": "Outdoor illuminance sensor (optional)",
+          "heating_limit": "Heating limit (24 h outdoor mean)"
+        }
+      },
+      "zone": {
+        "title": "Zone",
+        "description": "A zone = rooms controlled together; its radiators open equally.",
+        "data": {
+          "name": "Name",
+          "temp_sensor": "Room temperature sensor",
+          "temp_sensor_2": "Second sensor (optional)",
+          "trvs": "Thermostatic heads",
+          "windows": "Window/door contacts (optional)",
+          "comfort_temp": "Comfort temperature",
+          "eco_delta": "Setback",
+          "away_temp": "Away/vacation temperature",
+          "schedule": "Comfort times",
+          "radiator_kw": "Radiator nominal power (initial value)",
+          "area_m2": "Zone area (initial value)"
+        },
+        "data_description": {
+          "schedule": "e.g. Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30 or immer",
+          "radiator_kw": "A rough value is fine; the model learns the real one.",
+          "temp_sensor_2": "Replaces the main sensor while it gets direct sun."
+        }
+      },
+      "more": {
+        "title": "Another zone?",
+        "menu_options": {
+          "zone": "Add another zone",
+          "finish": "Finish"
+        }
+      }
+    }
+  },
+  "options": {
+    "error": {
+      "invalid_schedule": "Schedule not understood. Example: Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30",
+      "name_required": "Please enter a name.",
+      "name_exists": "Zone already exists.",
+      "trv_required": "Select at least one thermostat."
+    },
+    "step": {
+      "init": {
+        "title": "Settings",
+        "menu_options": {
+          "general": "Home (weather, outdoor, sun)",
+          "supply": "Supply temperature sensor",
+          "add_zone": "Add zone",
+          "edit_zone": "Edit zone",
+          "remove_zone": "Remove zone"
+        }
+      },
+      "general": {
+        "title": "Home",
+        "data": {
+          "weather_entity": "Weather service (temperature and forecast)",
+          "outdoor_sensor": "Own outdoor sensor (optional, offset is learned)",
+          "sun_sensor": "Outdoor illuminance sensor (optional)",
+          "heating_limit": "Heating limit (24 h outdoor mean)"
+        }
+      },
+      "supply": {
+        "title": "Supply sensor (optional)",
+        "description": "Pipe sensor at a radiator; only valid while that valve is open.",
+        "data": {
+          "supply_sensor": "Pipe sensor",
+          "supply_zone": "Radiator belongs to zone"
+        }
+      },
+      "add_zone": {
+        "title": "Add zone",
+        "data": {
+          "name": "Name",
+          "temp_sensor": "Room temperature sensor",
+          "temp_sensor_2": "Second sensor (optional)",
+          "trvs": "Thermostatic heads",
+          "windows": "Window/door contacts (optional)",
+          "comfort_temp": "Comfort temperature",
+          "eco_delta": "Setback",
+          "away_temp": "Away/vacation temperature",
+          "schedule": "Comfort times",
+          "radiator_kw": "Radiator nominal power (initial value)",
+          "area_m2": "Zone area (initial value)"
+        }
+      },
+      "zone_form": {
+        "title": "Edit zone",
+        "data": {
+          "name": "Name",
+          "temp_sensor": "Room temperature sensor",
+          "temp_sensor_2": "Second sensor (optional)",
+          "trvs": "Thermostatic heads",
+          "windows": "Window/door contacts (optional)",
+          "comfort_temp": "Comfort temperature",
+          "eco_delta": "Setback",
+          "away_temp": "Away/vacation temperature",
+          "schedule": "Comfort times",
+          "radiator_kw": "Radiator nominal power (initial value)",
+          "area_m2": "Zone area (initial value)"
+        }
+      },
+      "edit_zone": {
+        "title": "Edit zone",
+        "data": {
+          "zone": "Zone"
+        }
+      },
+      "remove_zone": {
+        "title": "Remove zone",
+        "data": {
+          "zone": "Zone"
+        }
+      }
+    }
+  },
+  "entity": {
+    "switch": {
+      "master": {
+        "name": "Control"
+      },
+      "active": {
+        "name": "Actively control"
+      }
+    },
+    "select": {
+      "presence": {
+        "name": "Presence",
+        "state": {
+          "zuhause": "Home",
+          "abwesend": "Away",
+          "urlaub": "Vacation"
+        }
+      }
+    },
+    "datetime": {
+      "return_at": {
+        "name": "Return from vacation"
+      }
+    },
+    "binary_sensor": {
+      "window": {
+        "name": "Window open"
+      },
+      "preheat": {
+        "name": "Preheating"
+      }
+    },
+    "climate": {
+      "zone": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "none": "Schedule",
+              "comfort": "Comfort",
+              "eco": "Setback",
+              "away": "Away"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "outdoor": {
+        "name": "Outdoor temperature"
+      },
+      "supply": {
+        "name": "Supply temperature (estimated)"
+      },
+      "sun": {
+        "name": "Solar irradiance"
+      },
+      "valve": {
+        "name": "Valve"
+      },
+      "power": {
+        "name": "Heating power"
+      },
+      "energy": {
+        "name": "Heating energy"
+      },
+      "demand": {
+        "name": "Heat demand"
+      },
+      "forecast_1h": {
+        "name": "Temperature in 1 h"
+      },
+      "forecast_3h": {
+        "name": "Temperature in 3 h"
+      },
+      "preheat_start": {
+        "name": "Next preheat start"
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "komfort": "Comfort",
+          "absenkung": "Setback",
+          "vorheizen": "Preheating",
+          "fenster": "Window open",
+          "frostschutz": "Frost protection",
+          "aus": "Off",
+          "rueckfall": "Safe mode",
+          "kein_sensor": "Sensor missing",
+          "sommer": "Summer",
+          "beobachten": "Observe only"
+        }
+      },
+      "saving": {
+        "name": "Saving from setback"
+      },
+      "learning": {
+        "name": "Learning progress"
+      },
+      "model_error": {
+        "name": "Model error"
+      },
+      "time_constant": {
+        "name": "Thermal mass time constant"
+      },
+      "heat_gain": {
+        "name": "Heating effect at full opening"
+      },
+      "heat_loss": {
+        "name": "Heat loss"
+      },
+      "disturbance": {
+        "name": "Internal gains"
+      }
+    }
+  }
+}
