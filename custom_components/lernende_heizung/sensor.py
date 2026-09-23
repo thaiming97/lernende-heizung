@@ -113,6 +113,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add:
 
 
 class ZoneSensor(ZoneEntity, SensorEntity):
+    _platform = "sensor"
     entity_description: ZoneSensorDesc
 
     def __init__(self, coordinator: HeatingCoordinator, zone: Zone, desc: ZoneSensorDesc) -> None:
@@ -125,6 +126,7 @@ class ZoneSensor(ZoneEntity, SensorEntity):
 
 
 class HubSensor(HubEntity, SensorEntity):
+    _platform = "sensor"
     entity_description: HubSensorDesc
 
     def __init__(self, coordinator: HeatingCoordinator, desc: HubSensorDesc) -> None:

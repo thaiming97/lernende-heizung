@@ -17,6 +17,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add:
 
 
 class PresenceSelect(HubEntity, SelectEntity):
+    _platform = "select"
     _attr_options = PRESENCE_OPTIONS
     _attr_icon = "mdi:home-account"
 

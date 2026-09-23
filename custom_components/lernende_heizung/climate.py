@@ -27,6 +27,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add:
 
 
 class ZoneClimate(ZoneEntity, ClimateEntity):
+    _platform = "climate"
     _attr_name = None
     _attr_translation_key = "zone"
     _attr_temperature_unit = UnitOfTemperature.CELSIUS

@@ -19,6 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add:
 
 
 class MasterSwitch(HubEntity, SwitchEntity):
+    _platform = "switch"
     _attr_icon = "mdi:radiator"
 
     def __init__(self, coordinator: HeatingCoordinator) -> None:
@@ -40,6 +41,7 @@ class MasterSwitch(HubEntity, SwitchEntity):
 
 
 class ZoneActiveSwitch(ZoneEntity, SwitchEntity):
+    _platform = "switch"
     _attr_icon = "mdi:thermostat-auto"
 
     def __init__(self, coordinator: HeatingCoordinator, zone: Zone) -> None:

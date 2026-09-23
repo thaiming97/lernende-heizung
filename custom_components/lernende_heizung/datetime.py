@@ -19,6 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add:
 
 
 class ReturnDateTime(HubEntity, DateTimeEntity):
+    _platform = "datetime"
     _attr_icon = "mdi:airplane-landing"
 
     def __init__(self, coordinator: HeatingCoordinator) -> None:

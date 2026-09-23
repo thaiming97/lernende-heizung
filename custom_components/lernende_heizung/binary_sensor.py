@@ -20,6 +20,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add:
 
 
 class WindowSensor(ZoneEntity, BinarySensorEntity):
+    _platform = "binary_sensor"
     _attr_device_class = BinarySensorDeviceClass.WINDOW
 
     def __init__(self, coordinator: HeatingCoordinator, zone: Zone) -> None:
@@ -31,6 +32,7 @@ class WindowSensor(ZoneEntity, BinarySensorEntity):
 
 
 class PreheatSensor(ZoneEntity, BinarySensorEntity):
+    _platform = "binary_sensor"
     _attr_icon = "mdi:clock-fast"
 
     def __init__(self, coordinator: HeatingCoordinator, zone: Zone) -> None:
