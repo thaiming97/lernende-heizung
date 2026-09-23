@@ -1,10 +1,10 @@
 {
   "domain": "lernende_heizung",
   "name": "Lernende Heizung",
+  "after_dependencies": ["mqtt", "weather", "zha"],
   "codeowners": ["@thaiming97"],
   "config_flow": true,
   "dependencies": [],
-  "after_dependencies": ["weather", "mqtt", "zha"],
   "documentation": "https://github.com/thaiming97/lernende-heizung",
   "integration_type": "hub",
   "iot_class": "calculated",
