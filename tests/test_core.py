@@ -306,3 +306,17 @@ def test_sun_facades_orientation():
     assert s > e and s > w and s > 0.3
     night = datetime(2026, 1, 15, 23, tzinfo=TZ).timestamp()
     assert sm.facades(night, 1.0) == (0.0, 0.0, 0.0)
+
+
+# ----------------------------------------------------------------------------- Version
+def test_version_consistent_and_documented():
+    """manifest.json, const.VERSION und CHANGELOG.md müssen zusammenpassen (daraus wird das Release)."""
+    import json
+    from pathlib import Path
+
+    from custom_components.lernende_heizung.const import VERSION
+
+    root = Path(__file__).parents[1]
+    manifest = json.loads((root / "custom_components" / "lernende_heizung" / "manifest.json").read_text(encoding="utf8"))
+    assert manifest["version"] == VERSION
+    assert f"\n## {VERSION} " in (root / "CHANGELOG.md").read_text(encoding="utf8")

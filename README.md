@@ -34,6 +34,9 @@ Thermostat MPC v2 (Standardwerte) lag bei ±0,5–0,7 K.
 
 Kein YAML, keine Helfer. Alles Weitere über „Konfigurieren“.
 
+Was sich in welcher Version geändert hat: [CHANGELOG.md](CHANGELOG.md) bzw. die
+Releases auf GitHub (HACS zeigt die Notizen beim Update an).
+
 ## Zeitplan
 
 Komfortzeiten als Text, z. B. `Mo-Fr 05:00-05:30, 15:30-22:30; Sa-So 08:00-22:30`

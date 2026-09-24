@@ -1,0 +1,45 @@
+name: Release
+# Neue Version in manifest.json auf main → Tag + GitHub-Release mit dem passenden
+# Abschnitt aus CHANGELOG.md. Tags ohne Release (z. B. nachträglich gesetzte) bekommen auch eins.
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Releases anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes() {
+            awk -v v="$1" '
+              /^## / { on = (index($0, "## " v " ") == 1) ; next }
+              on { print }
+            ' CHANGELOG.md
+          }
+          release() {  # $1 = Version, $2 = Ziel-Commit (leer = vorhandener Tag)
+            if gh release view "v$1" >/dev/null 2>&1; then return; fi
+            n="$(notes "$1")"
+            if [ -z "$(echo "$n" | tr -d '[:space:]')" ]; then
+              echo "::error::CHANGELOG.md hat keinen Abschnitt für $1"; exit 1
+            fi
+            if [ -n "$2" ]; then
+              gh release create "v$1" --title "$1" --notes "$n" --target "$2"
+            else
+              gh release create "v$1" --title "$1" --notes "$n" --verify-tag
+            fi
+          }
+          for t in $(git tag -l 'v*'); do release "${t#v}" ""; done
+          v="$(jq -r .version custom_components/lernende_heizung/manifest.json)"
+          if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+            release "$v" ""
+          else
+            release "$v" "$GITHUB_SHA"
+          fi
