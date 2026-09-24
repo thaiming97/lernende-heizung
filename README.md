@@ -12,11 +12,13 @@ auch mit anderen Thermostatköpfen.
 - **Plant 12 Stunden voraus**: heizt rechtzeitig vor, damit es zur Komfortzeit warm ist, hört
   vor einer Absenkung oder vor erwarteter Sonne früh genug auf.
 - **Stellt das Ventil direkt** (TRVZB: Öffnungs-/Schließgrad), batterieschonend gefiltert.
-- **Sicherheit**: Fenster offen → Ventil zu; Frostschutz; fehlt der Raumsensor → feste
-  mittlere Öffnung; Hauptschalter aus → Thermostatköpfe regeln wieder selbst.
+- **Sicherheit**: Fenster offen → Ventil zu; Frostschutz; Raumsensor fehlt oder meldet sich
+  3 h nicht → feste mittlere Öffnung; passt das gelernte Modell nicht zur Messung → einfacher
+  PI-Regler (Status „Sicherheitsbetrieb“); Hauptschalter aus → Thermostatköpfe regeln wieder
+  selbst, mit ihrem eingebauten Fühler.
 - **Statistiken**: Heizleistung, Heizenergie, Wärmebedarf, Vorhersage 1 h/3 h, nächster
   Vorheizstart, Einsparung durch Absenkung, Lernfortschritt, Modellfehler, Zeitkonstante,
-  geschätzter Vorlauf, Außentemperatur (Wetterdienst + eigener Fühler fusioniert).
+  Grundwärme (Personen, Geräte), geschätzter Vorlauf, Außentemperatur (Wetterdienst + eigener Fühler fusioniert).
 
 In der Simulation mit echten Wetter- und Raumdaten (Winter 2025/26) hielt der Regler die
 Komforttemperatur auf ±0,1 K, heizte pünktlich vor und schwang kaum über – Better
@@ -40,7 +42,9 @@ oder `immer`. Außerhalb gilt die Absenkung.
 ## Umstieg von Better Thermostat
 
 Neue Zonen starten im **Beobachtungsmodus** (Schalter „Aktiv regeln“ aus): sie lernen mit,
-schreiben aber nichts. Zum Umschalten je Zone: Better Thermostat für diese Zone deaktivieren,
+schreiben aber nichts. Wie stark der Heizkörper heizt, lernen sie dabei nur, wenn ein anderer
+Regler (z. B. Better Thermostat) die Ventile tatsächlich bewegt – sonst erst im aktiven Betrieb.
+Zum Umschalten je Zone: Better Thermostat für diese Zone deaktivieren,
 dann „Aktiv regeln“ einschalten. Beide gleichzeitig aktiv führt zu Konflikten.
 
 ## Entwicklung

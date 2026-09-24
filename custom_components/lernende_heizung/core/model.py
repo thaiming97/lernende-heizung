@@ -3,14 +3,15 @@
 Einheiten: Temperaturen in °C, Zeit in Stunden, Koeffizienten in 1/h, Heizwirkung in K/h.
 Kein Home-Assistant-Import – der Kern ist eigenständig test- und simulierbar.
 
-    dT/dt  = k_am·(Tm − T) + k_n·(Tn − T) + k_o·(To − T) + Σ g_j·S_j + q + d   (S_j: Sonne auf Ost/Süd/West)
+    dT/dt  = k_am·(Tm − T) + k_n·(Tn − T) + k_o·(To − T) + Σ g_j·S_j + g0 + q + d   (S_j: Sonne auf Ost/Süd/West)
     dTm/dt = k_ma·(T − Tm) + k_mb·(t_b − Tm)
     dq_i/dt = (u_eff · φ(Tvl, T) · w_i(To) − q_i) / tau_rad,   q = Σ h_i · q_i
 
 u_eff = v**valve_exp ist die wirksame Ventilöffnung (TRV-Kennlinie), φ die normierte
 Heizkörperleistung (1 bei Nennbedingungen 75/65/20 °C, Exponent 1,3), w_i Dreiecksgewichte an
 den Außentemperatur-Ankern −10/0/+10 °C. Die gelernten h_i enthalten damit auch Fehler der
-angenommenen Heizkurve – daraus lässt sich die echte Heizkurve rückrechnen.
+angenommenen Heizkurve – daraus lässt sich die echte Heizkurve rückrechnen. g0 ist die dauerhafte
+Grundwärme (Personen, Geräte), d nur der kurzfristige Rest, den der Regler laufend schätzt.
 """
 
 from __future__ import annotations
@@ -72,6 +73,7 @@ class ZoneParams:
     k_mb: float = 0.0
     t_b: float = 19.0
     g_sun: tuple[float, float, float] = (0.1, 0.2, 0.1)  # K/h je kW/m² Sonne auf Ost-/Süd-/Westfassade
+    g0: float = 0.0  # K/h dauerhafte Grundwärme (Personen, Geräte)
     h: tuple[float, float, float] = (1.3, 1.3, 1.3)  # K/h bei Nennleistung, je Außentemperatur-Anker
     valve_exp: float = 0.6
     tau_rad: float = 0.35
@@ -147,6 +149,7 @@ def derivatives(p: ZoneParams, s: ZoneState, x: Inputs, disturbance: float = 0.0
         + p.k_n * (tn - s.t)
         + p.k_o * (x.t_out - s.t)
         + sum(g * si for g, si in zip(p.g_sun, x.sun))
+        + p.g0
         + q
         + disturbance
     )
@@ -188,4 +191,4 @@ def steady_heat_demand(p: ZoneParams, t_room: float, t_out: float, t_nbr: float 
     denom = p.k_ma + p.k_mb
     tm = t_room if denom <= 0 else (p.k_ma * t_room + p.k_mb * p.t_b) / denom
     loss = p.k_am * (tm - t_room) + p.k_n * (tn - t_room) + p.k_o * (t_out - t_room)
-    return max(0.0, -loss)
+    return max(0.0, -loss - p.g0)

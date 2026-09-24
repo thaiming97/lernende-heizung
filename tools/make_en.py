@@ -54,7 +54,8 @@ names = {
     "forecast_1h": "Temperature in 1 h", "forecast_3h": "Temperature in 3 h", "preheat_start": "Next preheat start",
     "status": "Status", "saving": "Saving from setback", "learning": "Learning progress", "model_error": "Model error",
     "time_constant": "Thermal mass time constant", "heat_gain": "Heating effect at full opening", "heat_loss": "Heat loss",
-    "disturbance": "Internal gains",
+    "disturbance": "Short-term gains (cooking, visitors)",
+    "base_gain": "Base internal gains",
 }
 for ents in en["entity"].values():
     for k, v in ents.items():

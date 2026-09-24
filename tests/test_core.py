@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import copy
 import math
 import random
 from zoneinfo import ZoneInfo
@@ -11,10 +12,12 @@ import pytest
 
 from custom_components.lernende_heizung.core.actuator import ValveGate, trvzb_sequence
 from custom_components.lernende_heizung.core.controller import (
+    REASON_FALLBACK,
     REASON_FROST,
     REASON_NO_SENSOR,
     REASON_OFF,
     REASON_WINDOW,
+    ControllerConfig,
     Target,
     ZoneController,
 )
@@ -142,9 +145,54 @@ def test_controller_export_restore():
     c2.restore({"state": {"t": float("nan"), "tm": 1, "q": [0, 0, 0]}})  # kaputte Daten ignorieren
 
 
+def test_disturbance_frozen_while_window_open():
+    c = ZoneController(ZoneParams())
+    x = Inputs(t_out=0.0, t_nbr=21.0)
+    c.observe(0.0, 21.0, x, 0.0)
+    for k in range(1, 12):  # Fenster offen: 1,2 K/h Auskühlen
+        c.observe(k * 300.0, 21.0 - 0.1 * k, x, 0.0, freeze_d=True)
+    assert c.d == 0.0
+    for k in range(12, 24):
+        c.observe(k * 300.0, 21.0 - 0.1 * k, x, 0.0)
+    assert c.d < -0.1
+
+
+def test_plan_disturbance_fades():
+    p = ZoneParams(k_am=0.05, k_ma=0.02, k_n=0.0, k_o=0.003, h=(1.5, 1.5, 1.5))
+    x = Inputs(t_out=5.0)
+    tgt = lambda _ts: Target(15.0, False)  # noqa: E731 – nichts zu tun, Ventil bleibt zu
+    rises = []
+    for tau in (2.0, 1e6):
+        c = ZoneController(p, cfg=ControllerConfig(d_tau_h=tau))
+        c.observe(0.0, 21.0, x, 0.0)
+        c.d = 0.5  # z. B. Kochen
+        plan = c.make_plan(0.0, x, tgt, lambda _t: 5.0, lambda _t: NO_SUN)
+        assert plan.u.max() < 0.01
+        assert plan.t_pred[3] > 21.2  # kurzfristig wirkt die Störung voll
+        rises.append(plan.t_pred[-1] - 21.0)
+    # abklingend: höchstens ~1 K in 12 h; konstant fortgeschrieben wären es mehrere Kelvin
+    assert rises[0] < 1.0 < 2.0 < rises[1]
+
+
+def test_fallback_when_model_fails():
+    c = ZoneController(ZoneParams())
+    x = Inputs(t_out=0.0)
+    tgt = lambda _ts: Target(21.0, True)  # noqa: E731
+    c.observe(0.0, 20.0, x, 0.0)
+    c.d = -0.6  # Störgröße am Anschlag: Modell erklärt die Messung nicht
+    reasons = [c.decide(k * 300.0, 20.0, x, tgt, lambda _t: 0.0, lambda _t: NO_SUN).reason for k in range(30)]
+    assert reasons[0] != REASON_FALLBACK and reasons[-1] == REASON_FALLBACK
+    dec = c.decide(30 * 300.0, 20.0, x, tgt, lambda _t: 0.0, lambda _t: NO_SUN)
+    assert dec.reason == REASON_FALLBACK and dec.valve > 0.5  # 1 K zu kalt → kräftig auf
+    c.d = 0.0  # Modell passt wieder → vorausschauend
+    assert c.decide(31 * 300.0, 20.0, x, tgt, lambda _t: 0.0, lambda _t: NO_SUN).reason != REASON_FALLBACK
+    # Aufrufer meldet großen Modellfehler → sofort Rückfall
+    assert c.decide(32 * 300.0, 20.0, x, tgt, lambda _t: 0.0, lambda _t: NO_SUN, use_fallback=True).reason == REASON_FALLBACK
+
+
 # ----------------------------------------------------------------------------- Lernen
 def test_learner_recovers_parameters():
-    truth = ZoneParams(k_am=0.06, k_ma=0.02, k_n=0.012, k_o=0.003, g_sun=(0.1, 0.6, 0.0), h=(1.4, 1.4, 1.4), valve_exp=0.5)
+    truth = ZoneParams(k_am=0.06, k_ma=0.02, k_n=0.012, k_o=0.003, g_sun=(0.1, 0.6, 0.0), h=(1.4, 1.4, 1.4), valve_exp=0.5, g0=0.1)
     prior = ZoneParams(k_am=0.04, k_ma=0.02, k_n=0.01, k_o=0.004, h=(2.2, 2.2, 2.2))
     L = ZoneLearner(prior)
     curve = HeatingCurve()
@@ -165,6 +213,37 @@ def test_learner_recovers_parameters():
     assert abs(p.heat_gain(0.0) - 1.4) / 1.4 < 0.35, p.h
     assert p.valve_exp in (0.35, 0.5, 0.7)
     assert p.g_sun[1] > 0.2
+    assert 0.04 < p.g0 < 0.2, p.g0  # Grundwärme erkannt
+
+
+def test_learner_export_restore_and_migration():
+    prior = ZoneParams()
+    L = ZoneLearner(prior)
+    x = Inputs(t_out=0.0, t_nbr=21.0)
+    for k in range(40):
+        L.add(k * 300.0, 21.0 - 0.01 * k, x, 0.3)
+    raw = copy.deepcopy(L.export())
+    L2 = ZoneLearner(prior)
+    L2.restore(raw)
+    assert L2.samples == L.samples > 0 and L2.last_ts == L.last_ts
+    # Speichermasse überlebt den Neustart
+    assert all(c2.state is not None and math.isclose(c2.state.tm, c.state.tm) for c, c2 in zip(L.cands, L2.cands))
+    # alter Stand ohne Grundwärme (9 Parameter) wird übernommen, g0 startet beim Prior
+    old = copy.deepcopy(raw)
+    for rc in old["cands"]:
+        rc["theta"] = rc["theta"][:9]
+        rc["P"] = [row[:9] for row in rc["P"][:9]]
+        del rc["state"]
+    L3 = ZoneLearner(prior)
+    L3.restore(old)
+    assert L3.samples == L.samples and L3.params().g0 == prior.g0
+    assert math.isclose(L3.params().k_am, L.params().k_am)
+    # kaputte Daten ändern nichts
+    bad = copy.deepcopy(raw)
+    bad["cands"][3]["theta"][0] = float("nan")
+    L4 = ZoneLearner(prior)
+    L4.restore(bad)
+    assert L4.samples == 0 and L4.cands[0].state is None
 
 
 # ----------------------------------------------------------------------------- Ventil

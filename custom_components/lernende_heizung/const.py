@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.1.0"
+VERSION: Final = "0.2.0"
 
 PLATFORMS: Final = ["binary_sensor", "climate", "datetime", "select", "sensor", "switch"]
 
@@ -45,10 +45,12 @@ DEFAULT_AREA: Final = 15.0
 CYCLE_S: Final = 300
 REPLAN_S: Final = 900
 WINDOW_LEARN_PAUSE_S: Final = 1800
-SENSOR_STALE_S: Final = 1800
+SENSOR_STALE_S: Final = 3 * 3600  # Raumsensor ohne Meldung → als ausgefallen behandeln
 STORE_VERSION: Final = 1
 STORE_SAVE_DELAY_S: Final = 600
 PARAM_REFRESH_S: Final = 6 * 3600
+FALLBACK_RMSE: Final = 0.5  # K/h Modellfehler, ab dem der einfache PI-Regler übernimmt
+FALLBACK_MIN_SAMPLES: Final = 200  # erst nach ~2 Tagen Lernen beurteilen
 
 # Anwesenheit
 PRESENCE_HOME: Final = "zuhause"

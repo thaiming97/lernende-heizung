@@ -243,7 +243,10 @@
         "name": "Heat loss"
       },
       "disturbance": {
-        "name": "Internal gains"
+        "name": "Short-term gains (cooking, visitors)"
+      },
+      "base_gain": {
+        "name": "Base internal gains"
       }
     }
   }

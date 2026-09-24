@@ -142,7 +142,8 @@
       "time_constant": {"name": "Zeitkonstante Speichermasse"},
       "heat_gain": {"name": "Heizwirkung bei voll offen"},
       "heat_loss": {"name": "Wärmeverlust"},
-      "disturbance": {"name": "Störwärme (Personen, Geräte)"}
+      "disturbance": {"name": "Störwärme kurzfristig (Kochen, Besuch)"},
+      "base_gain": {"name": "Grundwärme (Personen, Geräte)"}
     }
   }
 }

@@ -1,6 +1,7 @@
 """Online-Lernen der Zonenparameter (rekursive kleinste Quadrate, Modellbank).
 
-Linear lernbar sind k_am, k_n, k_o, g_sun und die Heizwirkung h (3 Außentemperatur-Anker).
+Linear lernbar sind k_am, k_n, k_o, g_sun, die Heizwirkung h (3 Außentemperatur-Anker) und die
+Grundwärme g0.
 Nicht linear sind Masse-Zeitkonstante (k_ma) und Ventilkennlinie (valve_exp) – dafür laufen
 mehrere Kandidaten parallel, gewählt wird der mit dem kleinsten Vorhersagefehler.
 
@@ -23,16 +24,16 @@ from .model import (
     radiator_factor,
 )
 
-LIN = ("k_am", "k_n", "k_o", "g_e", "g_s", "g_w", "h0", "h1", "h2")
+LIN = ("k_am", "k_n", "k_o", "g_e", "g_s", "g_w", "h0", "h1", "h2", "g0")
 SAMPLE_H = 0.25
 
 
 def _theta(p: ZoneParams) -> list[float]:
-    return [p.k_am, p.k_n, p.k_o, *p.g_sun, *p.h]
+    return [p.k_am, p.k_n, p.k_o, *p.g_sun, *p.h, p.g0]
 
 
 def _with_theta(p: ZoneParams, th: list[float]) -> ZoneParams:
-    return replace(p, k_am=th[0], k_n=th[1], k_o=th[2], g_sun=(th[3], th[4], th[5]), h=(th[6], th[7], th[8]))
+    return replace(p, k_am=th[0], k_n=th[1], k_o=th[2], g_sun=(th[3], th[4], th[5]), h=(th[6], th[7], th[8]), g0=th[9])
 
 
 @dataclass
@@ -51,12 +52,12 @@ class Rls:
     def from_prior(cls, th0: list[float], rel: float = 0.6, lam: float = 0.9995) -> Rls:
         n = len(th0)
         # Prior-Unsicherheit: relativ zum Startwert, mit Mindestbreite
-        mins = [0.03, 0.01, 0.003, 0.2, 0.2, 0.2, 0.4, 0.4, 0.4]
+        mins = [0.03, 0.01, 0.003, 0.2, 0.2, 0.2, 0.4, 0.4, 0.4, 0.1]
         P = [[0.0] * n for _ in range(n)]
         for i in range(n):
             s = max(abs(th0[i]) * rel, mins[i])
             P[i][i] = s * s
-        upper = [max(1.0, 5 * th0[0]), 0.3, 0.05, 3.0, 3.0, 3.0, 6.0, 6.0, 6.0]
+        upper = [max(1.0, 5 * th0[0]), 0.3, 0.05, 3.0, 3.0, 3.0, 6.0, 6.0, 6.0, 0.5]
         return cls(list(th0), P, lam, upper, list(th0), [P[i][i] for i in range(n)])
 
     def update(self, x: list[float], y: float, r: float) -> float:
@@ -190,7 +191,7 @@ class ZoneLearner:
             s = c.state
             if s is None:
                 continue
-            x = [s.tm - m["t"], m["tn"] - m["t"], m["to"] - m["t"], m["se"], m["ss"], m["sw"], *s.q]
+            x = [s.tm - m["t"], m["tn"] - m["t"], m["to"] - m["t"], m["se"], m["ss"], m["sw"], *s.q, 1.0]
             e = c.rls.update(x, rate, r)
             c.n += 1
             c.score = 0.997 * c.score + 0.003 * e * e if c.n > 1 else e * e
@@ -216,9 +217,11 @@ class ZoneLearner:
     def export(self) -> dict:
         return {
             "best": self.best, "samples": self.samples, "heat_samples": self.heat_samples,
-            "resid_var": self.resid_var,
+            "resid_var": self.resid_var, "last_ts": self.last_ts,
             "cands": [{"k_ma": c.k_ma, "valve_exp": c.valve_exp, "theta": c.rls.theta, "P": c.rls.P,
-                       "score": c.score, "n": c.n} for c in self.cands],
+                       "score": c.score, "n": c.n,
+                       "state": None if c.state is None else {"t": c.state.t, "tm": c.state.tm, "q": list(c.state.q)}}
+                      for c in self.cands],
         }
 
     def restore(self, raw: dict) -> None:
@@ -226,16 +229,40 @@ class ZoneLearner:
             cands = raw["cands"]
             if len(cands) != len(self.cands):
                 return
+            n = len(LIN)
+            loaded = []
             for c, rc in zip(self.cands, cands):
                 th = [float(v) for v in rc["theta"]]
                 P = [[float(v) for v in row] for row in rc["P"]]
-                if len(th) != len(LIN) or not all(math.isfinite(v) for v in th):
+                if len(th) == n - 1 and len(P) == n - 1:
+                    # Stand vor der Grundwärme g0: Parameter übernehmen, g0 startet beim Prior
+                    th.append(c.rls.theta[-1])
+                    P = [row + [0.0] for row in P] + [[0.0] * (n - 1) + [c.rls.P[-1][-1]]]
+                if len(th) != n or len(P) != n or any(len(row) != n for row in P):
                     return
-                c.rls.theta, c.rls.P = th, P
-                c.score, c.n = float(rc["score"]), int(rc["n"])
+                if not all(math.isfinite(v) for v in th) or not all(math.isfinite(v) for row in P for v in row):
+                    return
+                loaded.append((c, th, P, float(rc["score"]), int(rc["n"]), _state_from(rc.get("state"))))
+            for c, th, P, score, cnt, st in loaded:
+                c.rls.theta, c.rls.P, c.score, c.n, c.state = th, P, score, cnt, st
             self.best = int(raw["best"])
             self.samples = int(raw["samples"])
             self.heat_samples = int(raw["heat_samples"])
             self.resid_var = float(raw["resid_var"])
+            lt = raw.get("last_ts")
+            self.last_ts = float(lt) if lt is not None and math.isfinite(float(lt)) else None
         except (KeyError, TypeError, ValueError):
             return
+
+
+def _state_from(raw) -> ZoneState | None:
+    """Gespeicherten Kandidatenzustand (Speichermasse, Heizkörper) prüfen und übernehmen."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        vals = [float(raw["t"]), float(raw["tm"]), *[float(v) for v in raw["q"]]]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if len(vals) != 5 or not all(math.isfinite(v) for v in vals):
+        return None
+    return ZoneState(vals[0], vals[1], vals[2:])

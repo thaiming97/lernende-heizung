@@ -2,12 +2,15 @@
 
 Ablauf je Regeltakt (typisch 5 min):
 1. Messwert glätten, Masse- und Heizkörperzustand mit der gemessenen Temperatur fortschreiben,
-   Störgröße (Personen, Kochen, Modellfehler) aus der Vorhersageabweichung schätzen.
+   kurzfristige Störgröße (Kochen, Besuch, Modellfehler) aus der Vorhersageabweichung schätzen.
+   Dauerhafte Grundwärme steckt im Modell (g0); die Störgröße klingt im Plan deshalb ab.
+   Bei offenem Fenster bleibt sie eingefroren (sonst heizt der Regler danach gegen ein
+   Phantom-Auskühlen an).
 2. Alle 15 min: Ventilverlauf für die nächsten 12 h optimieren. Der Horizont reicht bis zum nächsten
    Komfortbeginn → rechtzeitiges Vorheizen ergibt sich von selbst; ebenso das frühe Abschalten vor
    einer Absenkung oder vor erwarteter Sonne.
 3. Sicherheitsschicht: Fenster offen → zu; Frostschutz; Rückfall auf einfachen PI-Regler, wenn das
-   Modell unzuverlässig ist oder Messwerte fehlen.
+   Modell unzuverlässig ist (Störgröße lange am Anschlag oder Aufrufer meldet großen Modellfehler).
 """
 
 from __future__ import annotations
@@ -64,6 +67,8 @@ class ControllerConfig:
     band_high: float = 0.3  # K über Soll noch ok (Komfortzeit)
     obs_gain: float = 0.6  # 1/h: Anpassgeschwindigkeit der Störgröße
     obs_limit: float = 0.6  # K/h
+    d_tau_h: float = 2.0  # h: so schnell klingt die kurzfristige Störgröße im Plan ab
+    sat_fallback_h: float = 2.0  # h Störgröße am Anschlag → Modell unzuverlässig, PI-Rückfall
     meas_alpha: float = 0.35  # Glättung Messwert je 5-min-Takt
     frost_c: float = 7.0
     iters: int = 250
@@ -102,12 +107,17 @@ class ZoneController:
     last_pred: float | None = None
     last_ts: float | None = None
     fallback_i: float = 0.0
-    z_prev: np.ndarray | None = None
+    fallback_ts: float | None = None
+    sat_since: float | None = None
+    u_prev: np.ndarray | None = None  # letzter Plan (je 15-min-Schritt) für den Warmstart
+    u_prev_ts: float | None = None
     plan: Plan | None = None
 
     # ------------------------------------------------------------------ Zustand
-    def observe(self, ts: float, t_meas: float, x: Inputs, u_applied: float) -> None:
-        """Messwert einarbeiten. ts in Sekunden, u_applied = wirksame Öffnung seit dem letzten Takt."""
+    def observe(self, ts: float, t_meas: float, x: Inputs, u_applied: float, freeze_d: bool = False) -> None:
+        """Messwert einarbeiten. ts in Sekunden, u_applied = wirksame Öffnung seit dem letzten Takt.
+
+        freeze_d: Störgröße nicht nachführen (Fenster offen bzw. kurz danach)."""
         if self.state is None or self.last_ts is None or ts - self.last_ts > 6 * 3600:
             self.state = ZoneState(t_meas, t_meas - 0.2, [0.0, 0.0, 0.0])
             self.t_filt = t_meas
@@ -119,7 +129,7 @@ class ZoneController:
             return
         a = 1.0 - (1.0 - self.cfg.meas_alpha) ** (dt / (5 / 60))
         self.t_filt += a * (t_meas - self.t_filt)
-        if self.last_pred is not None:
+        if self.last_pred is not None and not freeze_d:
             innov = self.t_filt - self.last_pred
             k = 1.0 - math.exp(-self.cfg.obs_gain * dt)
             self.d += k * innov / max(dt, 1e-3)
@@ -148,6 +158,18 @@ class ZoneController:
             M[k, j] = 1.0
         return M
 
+    def _warm_start(self, ts: float, M: np.ndarray, n: int) -> np.ndarray:
+        """Startwert der Optimierung: letzter Plan, um die vergangene Zeit verschoben und auf die
+        Blöcke gemittelt (die 30-min-Blöcke verrutschen sonst bei jeder Neuplanung um 15 min)."""
+        m = M.shape[1]
+        if self.u_prev is None or self.u_prev_ts is None or len(self.u_prev) != n:
+            return np.full(m, self.u_eff)
+        k = int(round((ts - self.u_prev_ts) / (self.cfg.step_h * 3600.0)))
+        if k < 0 or k >= n:
+            return np.full(m, self.u_eff)
+        u = np.concatenate([self.u_prev[k:], np.full(k, self.u_prev[-1])])
+        return (M.T @ u) / M.sum(axis=0)
+
     def make_plan(
         self,
         ts: float,
@@ -173,11 +195,15 @@ class ZoneController:
         a_rad = 1.0 - math.exp(-dt / max(p.tau_rad, 1e-3))
         q0 = sum(h * qi for h, qi in zip(p.h, s.q))
 
-        # Freie Antwort (u = 0)
+        # Freie Antwort (u = 0); kurzfristige Störgröße klingt ab, Grundwärme g0 bleibt
         free = np.empty(n)
         T, Tm, q = s.t, s.tm, q0
+        d_fade = math.exp(-dt / max(cfg.d_tau_h, 1e-3))
+        d = self.d
         for k in range(n):
-            dT = p.k_am * (Tm - T) + p.k_n * (tn - T) + p.k_o * (t_out[k] - T) + sun[k] + q + self.d
+            if k:
+                d *= d_fade  # Schritt k: d·exp(−k·dt/τ)
+            dT = p.k_am * (Tm - T) + p.k_n * (tn - T) + p.k_o * (t_out[k] - T) + sun[k] + p.g0 + q + d
             dTm = p.k_ma * (T - Tm) + p.k_mb * (p.t_b - Tm)
             q = q + (0.0 - q) * a_rad
             T, Tm = T + dT * dt, Tm + dTm * dt
@@ -206,7 +232,7 @@ class ZoneController:
         bm = M.T @ b  # Energie je Block
 
         m = M.shape[1]
-        z = np.clip(self.z_prev if self.z_prev is not None and len(self.z_prev) == m else np.full(m, self.u_eff), 0, 1)
+        z = np.clip(self._warm_start(ts, M, n), 0, 1)
         # Lipschitz-Schätzung
         L = 2 * (cfg.w_low + cfg.w_high) * float(np.sum(Ge * Ge)) + 8 * cfg.w_smooth + 1e-6
         eta = 1.0 / L
@@ -228,7 +254,7 @@ class ZoneController:
         z = z_old
         u_steps = M @ z
         T_pred = free + G @ u_steps
-        self.z_prev = np.concatenate([z[1:], z[-1:]]) if m > 1 else z
+        self.u_prev, self.u_prev_ts = u_steps.copy(), ts
 
         # Diagnose: Vorheizstart = erster Heizschritt vor einem Komfortbeginn in Absenkzeit
         preheat = None
@@ -276,17 +302,13 @@ class ZoneController:
             return Decision(1.0, 1.0, REASON_FROST)
         if window_open:
             self.u_eff = 0.0
-            self.z_prev = None
+            self.u_prev = None
             return Decision(0.0, 0.0, REASON_WINDOW, disturbance=self.d)
 
         tg = target_at(ts)
-        if use_fallback:
-            e = tg.setpoint - self.t_filt
-            dt = 5 / 60
-            self.fallback_i = max(-0.5, min(1.0, self.fallback_i + 0.3 * e * dt))
-            u = max(0.0, min(1.0, 0.6 * e + self.fallback_i))
-            self.u_eff = u
-            return Decision(u, valve_from_effective(u, self.params.valve_exp), REASON_FALLBACK, disturbance=self.d)
+        if self._model_suspect(ts) or use_fallback:
+            return self._fallback(ts, t_meas, tg)
+        self.fallback_ts = None
 
         if self.last_plan_ts is None or ts - self.last_plan_ts >= replan_s - 1 or self.plan is None:
             self.plan = self.make_plan(ts, x_now, target_at, t_out_at, sun_at)
@@ -300,6 +322,33 @@ class ZoneController:
         else:
             reason = REASON_SETBACK
         return Decision(u, valve_from_effective(u, self.params.valve_exp), reason, self.plan, self.d)
+
+    def _model_suspect(self, ts: float) -> bool:
+        """Störgröße lange am Anschlag → das Modell erklärt die Messung nicht (Hysterese bis 50 %)."""
+        lim = self.cfg.obs_limit
+        if abs(self.d) >= 0.95 * lim:
+            if self.sat_since is None:
+                self.sat_since = ts
+        elif abs(self.d) < 0.5 * lim:
+            self.sat_since = None
+        return self.sat_since is not None and ts - self.sat_since >= self.cfg.sat_fallback_h * 3600
+
+    def _fallback(self, ts: float, t_meas: float, tg: Target) -> Decision:
+        """Einfacher PI-Regler auf den aktuellen Sollwert (ohne Vorheizen)."""
+        t = self.t_filt if self.t_filt is not None else t_meas
+        e = tg.setpoint - t
+        if self.fallback_ts is None:
+            # stoßfreier Übergang: Integral so setzen, dass die bisherige Öffnung erhalten bleibt
+            self.fallback_i = max(-0.5, min(1.0, self.u_eff - 0.6 * e))
+            dt = 0.0
+        else:
+            dt = min(0.25, max(0.0, (ts - self.fallback_ts) / 3600.0))
+        self.fallback_ts = ts
+        self.fallback_i = max(-0.5, min(1.0, self.fallback_i + 0.3 * e * dt))
+        u = max(0.0, min(1.0, 0.6 * e + self.fallback_i))
+        self.u_eff = u
+        self.plan, self.last_plan_ts, self.u_prev = None, None, None  # nach dem Rückfall sofort neu planen
+        return Decision(u, valve_from_effective(u, self.params.valve_exp), REASON_FALLBACK, disturbance=self.d)
 
     # ------------------------------------------------------------------ Persistenz
     def export(self) -> dict:

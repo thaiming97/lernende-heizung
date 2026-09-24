@@ -48,6 +48,8 @@ from .const import (
     DEFAULT_HEATING_LIMIT,
     DEFAULT_SCHEDULE,
     DOMAIN,
+    FALLBACK_MIN_SAMPLES,
+    FALLBACK_RMSE,
     PARAM_REFRESH_S,
     PRESENCE_AWAY,
     PRESENCE_HOME,
@@ -57,6 +59,7 @@ from .const import (
     PRESET_ECO,
     PRESET_SCHEDULE,
     REPLAN_S,
+    SENSOR_STALE_S,
     STORE_SAVE_DELAY_S,
     STORE_VERSION,
     WINDOW_LEARN_PAUSE_S,
@@ -81,12 +84,18 @@ REASON_OBSERVE = "beobachten"
 FROST_C = 7.0
 
 
-def _num(hass: HomeAssistant, entity_id: str | None) -> float | None:
+def _num(hass: HomeAssistant, entity_id: str | None, max_age_s: float | None = None) -> float | None:
+    """Zahlenwert einer Entity; mit max_age_s gilt ein Sensor ohne Meldung als ausgefallen
+    (Zigbee-Sensoren behalten bei leerer Batterie oft einfach den letzten Wert)."""
     if not entity_id:
         return None
     st = hass.states.get(entity_id)
     if st is None or st.state in (STATE_UNAVAILABLE, STATE_UNKNOWN, ""):
         return None
+    if max_age_s is not None:
+        seen = getattr(st, "last_reported", None) or st.last_updated
+        if (dt_util.utcnow() - seen).total_seconds() > max_age_s:
+            return None
     try:
         v = float(st.state)
     except ValueError:
@@ -124,6 +133,7 @@ class Zone:
     valve_pct: int = 0  # von uns gestellt
     valve_obs: float | None = None  # beobachtet (Beobachtungsmodus, z. B. BT regelt)
     last_open_ts: float = 0.0
+    last_window_ts: float = 0.0
     decision: Decision | None = None
     energy_kwh: float = 0.0
     params_ts: float = 0.0
@@ -384,8 +394,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Raumtemperaturen (gefiltert)
         for z in self.zones.values():
-            prim = _num(self.hass, z.cfg.get(CONF_TEMP))
-            sec = _num(self.hass, z.cfg.get(CONF_TEMP2))
+            prim = _num(self.hass, z.cfg.get(CONF_TEMP), SENSOR_STALE_S)
+            sec = _num(self.hass, z.cfg.get(CONF_TEMP2), SENSOR_STALE_S)
             z.temp = z.filt.update(now_ts, prim, sec)
             z.window_open = any(
                 (st := self.hass.states.get(w)) is not None and st.state == STATE_ON for w in z.cfg.get(CONF_WINDOWS, [])
@@ -427,6 +437,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Lernen (auch im Beobachtungsmodus, sofern die Ventilstellung bekannt ist)
             if z.window_open:
                 z.learner.block(now_ts + WINDOW_LEARN_PAUSE_S)
+                z.last_window_ts = now_ts
             if valve_frac is not None:
                 z.learner.add(now_ts, z.temp, x, valve_frac)
             else:
@@ -436,7 +447,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 z.controller.params = z.learner.params()
                 z.params_ts = now_ts
             if z.temp is not None:
-                z.controller.observe(now_ts, z.temp, x, effective_valve(valve_frac, z.controller.params.valve_exp))
+                # Fenster offen (und kurz danach): Auskühlen nicht als Störgröße lernen
+                freeze = now_ts - z.last_window_ts < WINDOW_LEARN_PAUSE_S
+                z.controller.observe(now_ts, z.temp, x, effective_valve(valve_frac, z.controller.params.valve_exp), freeze_d=freeze)
             z.energy_kwh += heating_power_kw(z.controller.params, z.controller.state) * dt_h if z.controller.state else 0.0
 
             if summer and not z.window_open and (z.temp is None or z.temp > FROST_C):
@@ -445,10 +458,12 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     dec = Decision(1.0, 1.0, REASON_SUMMER)  # Ventil einmal durchbewegen (gegen Festsitzen)
             else:
                 tgt = lambda ts, z=z: self.target_at(z, ts)  # noqa: E731
+                # Modell sagt die Raumtemperatur dauerhaft schlecht voraus → einfacher PI-Regler
+                bad_model = z.learner.samples >= FALLBACK_MIN_SAMPLES and z.learner.rmse() > FALLBACK_RMSE
                 dec = await self.hass.async_add_executor_job(
                     lambda: z.controller.decide(
                         now_ts, z.temp, x, tgt, self.t_out_at(now_ts), self.sun_at(now_ts),
-                        window_open=z.window_open, replan_s=REPLAN_S,
+                        window_open=z.window_open, use_fallback=bad_model, replan_s=REPLAN_S,
                     )
                 )
                 if z.hvac_off and dec.reason not in ("frostschutz", "fenster"):
@@ -507,7 +522,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         def calc() -> float | None:
             c = copy.deepcopy(z.controller)
-            c.z_prev = None
+            c.u_prev = None
             comfort = c.make_plan(now_ts, x, lambda ts: Target(z.comfort, True), self.t_out_at(now_ts), self.sun_at(now_ts))
             plan = z.decision.plan
             e_c = float(sum(comfort.u))

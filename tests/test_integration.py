@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest.mock import patch
 
 from homeassistant import config_entries
@@ -25,7 +26,9 @@ from custom_components.lernende_heizung.const import (
     CONF_ZONE_NAME,
     CONF_ZONES,
     DOMAIN,
+    SENSOR_STALE_S,
 )
+from custom_components.lernende_heizung.coordinator import _num
 
 ZONE = {
     CONF_ZONE_ID: "bad", CONF_ZONE_NAME: "Bad", CONF_TEMP: "sensor.bad_temp", CONF_TRVS: ["climate.bad"],
@@ -134,13 +137,15 @@ async def test_observe_then_control_window_and_master(hass: HomeAssistant) -> No
         assert last["number.bad_valve_opening_degree"] == 0
         assert hass.states.get(_eid(hass, entry, "sensor", "bad_status")).state == "fenster"
 
-        # Hauptschalter aus → TRV bekommt die Kontrolle zurück
+        # Hauptschalter aus → TRV bekommt die Kontrolle zurück (mit eigenem Fühler)
         calls.clear()
+        hass.states.async_set("select.bad_temperature_sensor_select", "external", {"options": ["internal", "external"]})
         await hass.services.async_call("switch", "turn_off", {"entity_id": _eid(hass, entry, "switch", "master")}, blocking=True)
         await hass.async_block_till_done()
         last = {c.data["entity_id"]: c.data["value"] for c in calls}
         assert last["number.bad_valve_opening_degree"] == 100 and last["number.bad_valve_closing_degree"] == 100
         assert temp_calls and not coord.zones["bad"].controlled
+        assert sel_calls[-1].data["option"] == "internal"
 
     assert await hass.config_entries.async_unload(entry.entry_id)
 
@@ -180,3 +185,10 @@ async def test_state_survives_restart(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
     z = entry.runtime_data.zones["bad"]
     assert z.active and z.energy_kwh >= 12.5
+
+async def test_stale_room_sensor_counts_as_missing(hass: HomeAssistant, freezer) -> None:
+    hass.states.async_set("sensor.raum", "21.0")
+    assert _num(hass, "sensor.raum", SENSOR_STALE_S) == 21.0
+    freezer.tick(timedelta(seconds=SENSOR_STALE_S + 60))  # Batterie leer: keine Meldung mehr
+    assert _num(hass, "sensor.raum", SENSOR_STALE_S) is None
+    assert _num(hass, "sensor.raum") == 21.0  # ohne Altersgrenze (z. B. Außenfühler) weiter nutzbar

@@ -169,12 +169,19 @@ class TrvActuator:
             return
 
     async def release(self, fallback_temp: float) -> None:
-        """Kontrolle zurückgeben: TRV regelt wieder selbst."""
+        """Kontrolle zurückgeben: TRV regelt wieder selbst – mit dem eingebauten Fühler, denn den
+        externen Wert schreibt danach niemand mehr (der TRV würde auf einen eingefrorenen Wert regeln)."""
         if self._pending and not self._pending.done():
             self._pending.cancel()
         if self.kind == "trvzb":
             await self._number("open", 100)
             await self._number("close", 100)
+        sel = self.entities.get("select")
+        sst = self.hass.states.get(sel) if sel else None
+        if sst is not None and sst.state != "internal" and "internal" in (sst.attributes.get("options") or []):
+            await self.hass.services.async_call(
+                "select", "select_option", {ATTR_ENTITY_ID: sel, "option": "internal"}, blocking=True
+            )
         await self.hass.services.async_call(
             "climate", "set_temperature", {ATTR_ENTITY_ID: self.climate_id, "temperature": fallback_temp}, blocking=True
         )

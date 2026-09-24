@@ -16,6 +16,7 @@ OBJECT_IDS = {
     "forecast_1h": "temperatur_1h", "forecast_3h": "temperatur_3h", "preheat_start": "vorheizstart",
     "status": "status", "saving": "einsparung", "learning": "lernfortschritt", "model_error": "modellfehler",
     "time_constant": "zeitkonstante", "heat_gain": "heizwirkung", "heat_loss": "waermeverlust", "disturbance": "stoerwaerme",
+    "base_gain": "grundwaerme",
 }
 
 

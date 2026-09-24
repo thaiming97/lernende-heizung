@@ -92,6 +92,8 @@ ZONE_SENSORS: tuple[ZoneSensorDesc, ...] = (
                    value=lambda c, z: round(1000 * (z.controller.params.k_o + z.controller.params.k_n) * z.controller.params.c_eff_kwh_per_k, 1)),
     ZoneSensorDesc(key="disturbance", native_unit_of_measurement="K/h", state_class=SensorStateClass.MEASUREMENT,
                    entity_category=EntityCategory.DIAGNOSTIC, value=lambda c, z: round(z.controller.d, 3)),
+    ZoneSensorDesc(key="base_gain", native_unit_of_measurement="K/h", state_class=SensorStateClass.MEASUREMENT,
+                   entity_category=EntityCategory.DIAGNOSTIC, value=lambda c, z: round(z.controller.params.g0, 3)),
 )
 
 HUB_SENSORS: tuple[HubSensorDesc, ...] = (
