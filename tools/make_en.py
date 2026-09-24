@@ -56,12 +56,14 @@ names = {
     "time_constant": "Thermal mass time constant", "heat_gain": "Heating effect at full opening", "heat_loss": "Heat loss",
     "disturbance": "Short-term gains (cooking, visitors)",
     "base_gain": "Base internal gains",
+    "season": "Heating season", "heating_season": "Heating period",
 }
 for ents in en["entity"].values():
     for k, v in ents.items():
         if k in names:
             v["name"] = names[k]
 en["entity"]["select"]["presence"]["state"] = {"zuhause": "Home", "abwesend": "Away", "urlaub": "Vacation"}
+en["entity"]["select"]["season"]["state"] = {"auto": "Automatic (heating limit)", "winter": "Winter (heat)", "sommer": "Summer (off)"}
 en["entity"]["climate"]["zone"]["state_attributes"]["preset_mode"]["state"] = {"none": "Schedule", "comfort": "Comfort", "eco": "Setback", "away": "Away"}
 en["entity"]["sensor"]["status"]["state"] = {
     "komfort": "Comfort", "absenkung": "Setback", "vorheizen": "Preheating", "fenster": "Window open", "frostschutz": "Frost protection",

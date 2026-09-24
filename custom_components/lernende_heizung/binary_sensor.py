@@ -1,4 +1,4 @@
-"""Fenster offen (je Zone, zusammengefasst) und Vorheizen aktiv."""
+"""Fenster offen und Vorheizen aktiv (je Zone), Heizperiode (Wohnung)."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HeatingConfigEntry
 from .coordinator import HeatingCoordinator, Zone
-from .entity import ZoneEntity
+from .entity import HubEntity, ZoneEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add: AddConfigEntryEntitiesCallback) -> None:
     c = entry.runtime_data
-    ents = []
+    ents: list[BinarySensorEntity] = [HeatingSeasonSensor(c)]
     for z in c.zones.values():
         ents += [WindowSensor(c, z), PreheatSensor(c, z)]
     add(ents)
@@ -42,3 +42,17 @@ class PreheatSensor(ZoneEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         d = self.zone.decision
         return bool(d and d.reason == "vorheizen")
+
+
+class HeatingSeasonSensor(HubEntity, BinarySensorEntity):
+    """An = es wird geheizt und gelernt (Winter bzw. unter der Heizgrenze)."""
+
+    _platform = "binary_sensor"
+    _attr_icon = "mdi:radiator"
+
+    def __init__(self, coordinator: HeatingCoordinator) -> None:
+        super().__init__(coordinator, "heating_season")
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.heating_season

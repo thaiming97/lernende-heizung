@@ -149,6 +149,14 @@
           "abwesend": "Away",
           "urlaub": "Vacation"
         }
+      },
+      "season": {
+        "name": "Heating season",
+        "state": {
+          "auto": "Automatic (heating limit)",
+          "winter": "Winter (heat)",
+          "sommer": "Summer (off)"
+        }
       }
     },
     "datetime": {
@@ -162,6 +170,9 @@
       },
       "preheat": {
         "name": "Preheating"
+      },
+      "heating_season": {
+        "name": "Heating period"
       }
     },
     "climate": {

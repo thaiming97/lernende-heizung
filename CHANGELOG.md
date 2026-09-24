@@ -4,6 +4,17 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.3.0 – 2026-09-24
+
+- Neue Auswahl **„Heizsaison“**: *Automatisch* (wie bisher: über der Heizgrenze, 24-h-Mittel
+  außen, wird nicht geheizt), *Winter* (heizt immer, auch an warmen Tagen) oder *Sommer*
+  (Heizung aus, Ventile zu, einmal pro Woche kurz durchbewegen).
+- Im Sommer **pausiert das Lernen**. Offene Fenster, Sommerlüftung und starke Sonne passen nicht
+  zum Heizbetrieb, und über Monate hätte die Regelung sonst vergessen, wie stark die Heizkörper
+  heizen.
+- Neuer Sensor **„Heizperiode“** (an = es wird geheizt und gelernt) – zeigt auch im
+  Automatik-Betrieb, was gerade gilt.
+
 ## 0.2.0 – 2026-09-24
 
 **Regelung**

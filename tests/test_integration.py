@@ -192,3 +192,51 @@ async def test_stale_room_sensor_counts_as_missing(hass: HomeAssistant, freezer)
     freezer.tick(timedelta(seconds=SENSOR_STALE_S + 60))  # Batterie leer: keine Meldung mehr
     assert _num(hass, "sensor.raum", SENSOR_STALE_S) is None
     assert _num(hass, "sensor.raum") == 21.0  # ohne Altersgrenze (z. B. Außenfühler) weiter nutzbar
+
+
+async def test_season_switch_closes_valves_and_pauses_learning(hass: HomeAssistant) -> None:
+    calls = async_mock_service(hass, "number", "set_value")
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry = await _setup(hass)
+        coord = entry.runtime_data
+        async_mock_service(hass, "climate", "set_hvac_mode")
+        # TRV steht schon auf externem Fühler → kein Aufruf des (hier echten) select-Dienstes nötig
+        hass.states.async_set("select.bad_temperature_sensor_select", "external", {"options": ["internal", "external"]})
+        await hass.services.async_call("switch", "turn_on", {"entity_id": _eid(hass, entry, "switch", "bad_active")}, blocking=True)
+        await hass.async_block_till_done()
+        assert hass.states.get(_eid(hass, entry, "binary_sensor", "heating_season")).state == "on"
+
+        # Sommer: Ventil zu, Lernen pausiert
+        calls.clear()
+        await hass.services.async_call(
+            "select", "select_option", {"entity_id": _eid(hass, entry, "select", "season"), "option": "sommer"}, blocking=True
+        )
+        await hass.async_block_till_done()
+        last = {c.data["entity_id"]: c.data["value"] for c in calls}
+        assert last["number.bad_valve_opening_degree"] == 0
+        assert hass.states.get(_eid(hass, entry, "sensor", "bad_status")).state == "sommer"
+        assert hass.states.get(_eid(hass, entry, "binary_sensor", "heating_season")).state == "off"
+        z = coord.zones["bad"]
+        assert z.learner.blocked_until > 0
+        n = z.learner.samples
+        for _ in range(5):
+            coord._last_ts = None
+            await coord.async_refresh()
+        assert z.learner.samples == n
+
+        # Winter erzwingt Heizen, auch wenn es draußen warm ist
+        coord.t_out_mean24 = 25.0
+        await hass.services.async_call(
+            "select", "select_option", {"entity_id": _eid(hass, entry, "select", "season"), "option": "winter"}, blocking=True
+        )
+        await hass.async_block_till_done()
+        assert hass.states.get(_eid(hass, entry, "sensor", "bad_status")).state != "sommer"
+        assert coord.heating_season
+        # Automatisch: Heizgrenze (16 °C) entscheidet → bei 25 °C Sommer
+        await hass.services.async_call(
+            "select", "select_option", {"entity_id": _eid(hass, entry, "select", "season"), "option": "auto"}, blocking=True
+        )
+        await hass.async_block_till_done()
+        assert not coord.heating_season
+        assert coord._export()["season"] == "auto"
+    assert await hass.config_entries.async_unload(entry.entry_id)

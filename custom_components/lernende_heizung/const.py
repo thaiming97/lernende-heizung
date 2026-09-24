@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.2.0"
+VERSION: Final = "0.3.0"
 
 PLATFORMS: Final = ["binary_sensor", "climate", "datetime", "select", "sensor", "switch"]
 
@@ -57,6 +57,12 @@ PRESENCE_HOME: Final = "zuhause"
 PRESENCE_AWAY: Final = "abwesend"
 PRESENCE_VACATION: Final = "urlaub"
 PRESENCE_OPTIONS: Final = [PRESENCE_HOME, PRESENCE_AWAY, PRESENCE_VACATION]
+
+# Heizsaison: automatisch über die Heizgrenze, oder fest Winter/Sommer
+SEASON_AUTO: Final = "auto"
+SEASON_WINTER: Final = "winter"
+SEASON_SUMMER: Final = "sommer"
+SEASON_OPTIONS: Final = [SEASON_AUTO, SEASON_WINTER, SEASON_SUMMER]
 
 # Zonen-Betriebsarten (Presets des climate-Entitys)
 PRESET_SCHEDULE: Final = "none"

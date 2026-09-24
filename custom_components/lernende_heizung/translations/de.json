@@ -106,10 +106,11 @@
       "active": {"name": "Aktiv regeln"}
     },
     "select": {
-      "presence": {"name": "Anwesenheit", "state": {"zuhause": "Zuhause", "abwesend": "Abwesend", "urlaub": "Urlaub"}}
+      "presence": {"name": "Anwesenheit", "state": {"zuhause": "Zuhause", "abwesend": "Abwesend", "urlaub": "Urlaub"}},
+      "season": {"name": "Heizsaison", "state": {"auto": "Automatisch (Heizgrenze)", "winter": "Winter (heizen)", "sommer": "Sommer (aus)"}}
     },
     "datetime": {"return_at": {"name": "Rückkehr aus dem Urlaub"}},
-    "binary_sensor": {"window": {"name": "Fenster offen"}, "preheat": {"name": "Vorheizen"}},
+    "binary_sensor": {"window": {"name": "Fenster offen"}, "preheat": {"name": "Vorheizen"}, "heating_season": {"name": "Heizperiode"}},
     "climate": {
       "zone": {
         "state_attributes": {

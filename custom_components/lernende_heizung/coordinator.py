@@ -59,6 +59,10 @@ from .const import (
     PRESET_ECO,
     PRESET_SCHEDULE,
     REPLAN_S,
+    SEASON_AUTO,
+    SEASON_OPTIONS,
+    SEASON_SUMMER,
+    SEASON_WINTER,
     SENSOR_STALE_S,
     STORE_SAVE_DELAY_S,
     STORE_VERSION,
@@ -172,6 +176,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.store: Store = Store(hass, STORE_VERSION, f"{DOMAIN}.{entry.entry_id}")
         self.master_on = True
         self.presence = PRESENCE_HOME
+        self.season = SEASON_AUTO
+        self.heating_season = True  # Ergebnis aus Heizsaison-Auswahl bzw. Heizgrenze
         self.return_at: datetime | None = None
         self.fusion = OutdoorFusion()
         self.sun = SunModel(hass.config.latitude, hass.config.longitude)
@@ -232,6 +238,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return {
             "master_on": self.master_on,
             "presence": self.presence,
+            "season": self.season,
             "return_at": self.return_at.isoformat() if self.return_at else None,
             "fusion": self.fusion.export(),
             "supply": self.supply.export(),
@@ -252,6 +259,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.master_on = bool(raw.get("master_on", True))
         if raw.get("presence") in (PRESENCE_HOME, PRESENCE_AWAY, PRESENCE_VACATION):
             self.presence = raw["presence"]
+        if raw.get("season") in SEASON_OPTIONS:
+            self.season = raw["season"]
         if raw.get("return_at"):
             self.return_at = dt_util.parse_datetime(raw["return_at"])
         self.fusion.restore(raw.get("fusion", {}))
@@ -410,10 +419,16 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.supply.n >= 30:
             curve = HeatingCurve(tvl_at_m10=self.supply.supply(-10), tvl_at_p15=self.supply.supply(15))
 
-        summer = (
-            self.t_out_mean24 is not None
-            and self.t_out_mean24 > float(opts.get(CONF_HEATING_LIMIT, DEFAULT_HEATING_LIMIT))
-        )
+        if self.season == SEASON_SUMMER:
+            summer = True
+        elif self.season == SEASON_WINTER:
+            summer = False
+        else:
+            summer = (
+                self.t_out_mean24 is not None
+                and self.t_out_mean24 > float(opts.get(CONF_HEATING_LIMIT, DEFAULT_HEATING_LIMIT))
+            )
+        self.heating_season = not summer
         dt_h = 0.0 if self._last_ts is None else min(1.0, (now_ts - self._last_ts) / 3600)
         self._last_ts = now_ts
 
@@ -434,11 +449,15 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 z.valve_obs = valve_frac
             if valve_frac is not None and valve_frac > 0:
                 z.last_open_ts = now_ts
-            # Lernen (auch im Beobachtungsmodus, sofern die Ventilstellung bekannt ist)
+            # Lernen (auch im Beobachtungsmodus, sofern die Ventilstellung bekannt ist). Im Sommer
+            # pausiert es: offene Fenster, Sommerlüftung und starke Sonne passen nicht zum Winter, und
+            # der Zug zum Startwert würde das Gelernte über die Heizkörper langsam vergessen.
             if z.window_open:
                 z.learner.block(now_ts + WINDOW_LEARN_PAUSE_S)
                 z.last_window_ts = now_ts
-            if valve_frac is not None:
+            if summer:
+                z.learner.block(now_ts + CYCLE_S)
+            elif valve_frac is not None:
                 z.learner.add(now_ts, z.temp, x, valve_frac)
             else:
                 z.learner.block(now_ts + CYCLE_S)

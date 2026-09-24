@@ -42,6 +42,12 @@ Releases auf GitHub (HACS zeigt die Notizen beim Update an).
 Komfortzeiten als Text, z. B. `Mo-Fr 05:00-05:30, 15:30-22:30; Sa-So 08:00-22:30`
 oder `immer`. Außerhalb gilt die Absenkung.
 
+## Sommer / Winter
+
+Auswahl „Heizsaison“: *Automatisch* entscheidet über die Heizgrenze (einstellbar unter
+„Konfigurieren“ → Wohnung), *Winter* heizt immer, *Sommer* schaltet ab. Außerhalb der
+Heizperiode sind die Ventile zu und das Lernen pausiert; der Sensor „Heizperiode“ zeigt, was gilt.
+
 ## Umstieg von Better Thermostat
 
 Neue Zonen starten im **Beobachtungsmodus** (Schalter „Aktiv regeln“ aus): sie lernen mit,

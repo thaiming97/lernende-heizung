@@ -10,7 +10,7 @@ from .coordinator import HeatingCoordinator, Zone
 
 # Sprechende, sprachunabhängige Entity-IDs mit Endung _lh (lernende Heizung)
 OBJECT_IDS = {
-    "master": "regelung", "presence": "anwesenheit", "return_at": "rueckkehr", "outdoor": "aussentemperatur",
+    "master": "regelung", "presence": "anwesenheit", "season": "heizsaison", "heating_season": "heizperiode", "return_at": "rueckkehr", "outdoor": "aussentemperatur",
     "supply": "vorlauf", "sun": "sonne", "active": "aktiv", "window": "fenster", "preheat": "vorheizen",
     "valve": "ventil", "power": "heizleistung", "energy": "heizenergie", "demand": "waermebedarf",
     "forecast_1h": "temperatur_1h", "forecast_3h": "temperatur_3h", "preheat_start": "vorheizstart",
