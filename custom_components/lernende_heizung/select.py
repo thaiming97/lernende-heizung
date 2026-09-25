@@ -31,6 +31,7 @@ class PresenceSelect(HubEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         self.coordinator.presence = option
         for z in self.coordinator.zones.values():
+            z.override = None  # von Hand verstellte Temperaturen gelten nur bis zum Anwesenheitswechsel
             z.controller.last_plan_ts = None
         self.coordinator.schedule_save()
         await self.coordinator.async_refresh()

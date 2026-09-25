@@ -4,6 +4,32 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.5.2 – 2026-09-25
+
+Fehlerkorrekturen aus einer Überprüfung der Regellogik:
+
+- **Gelerntes wird jetzt auch im laufenden Betrieb gespeichert** (alle 15 Minuten). Bisher
+  landete es nur beim sauberen Beenden von Home Assistant auf der Platte – nach einem Absturz
+  oder Stromausfall war alles seit dem letzten Neustart verloren.
+- **Nach dem Lüften kein Vollgas mehr**: Der Filter gegen Sonne auf dem Raumsensor hielt nach
+  dem Fensterschließen den kalten Wert bis zu einer Stunde fest (die Luft wird dann ganz echt
+  schnell wieder warm) – in Räumen ohne Zweitsensor heizte die Regelung so lange voll. Er greift
+  jetzt nur noch, wenn Sonne scheinen kann, und nicht in der Stunde nach dem Lüften.
+- **Ausgeschaltete Thermostatköpfe werden bemerkt**: Wird ein Kopf während der Regelung auf
+  „Aus“ gestellt (von Hand, Automation, nach Batteriewechsel) oder war er beim Übernehmen nicht
+  erreichbar, stellt die Regelung ihn wieder auf Heizen und meldet es unter „Problem“. Kam ein
+  Ventilbefehl nicht an, wird er wiederholt. Solange die Ventilstellung unsicher ist, pausiert
+  das Lernen (sonst hielte das Modell den Heizkörper für schwächer, als er ist).
+- **Vorlauffühler** zählt schon ab 8 % Ventilöffnung (bisher 30 % – in gut gedämmten Wohnungen
+  steht das Ventil fast nie so weit offen). „Kessel liefert keine Wärme“ weiterhin nur bei weit
+  offenem Ventil, damit es keine Fehlalarme gibt.
+- **Temperatur verstellen wirkt immer**: Bei aktivem Preset (Komfort/Eco/Abwesend) oder
+  Anwesenheit „Abwesend“ wurde eine neue Temperatur bisher ignoriert. Sie gilt jetzt bis zum
+  nächsten Wechsel im Zeitplan; ein Wechsel der Anwesenheit hebt sie auf.
+- **Heizgrenze mit Schaltabstand** (±0,5 K), damit die Automatik um 16 °C herum nicht zwischen
+  Sommer und Winter hin- und herschaltet.
+- Zeitplan versteht englische Tage vollständig (bisher scheiterten Tue, Wed, Thu, Sun).
+
 ## 0.5.1 – 2026-09-25
 
 - „Gelerntes zurücksetzen“ mit Sicherung: Der erste Druck zeigt eine Warnung (unter

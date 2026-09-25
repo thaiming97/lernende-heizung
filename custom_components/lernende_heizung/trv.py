@@ -30,6 +30,8 @@ _KEYS = {
     "select": ("temperature_sensor_select", "temperature_sensor"),
 }
 BUMP_DELAY_S = 5.0
+REASSERT_S = 900.0  # frühestens so oft erneut einschalten/umstellen, falls der Kopf nicht übernimmt
+ERROR_HOLD_S = 600.0  # so lange nach einem fehlgeschlagenen Befehl gilt die Stellung als unsicher
 
 
 class TrvActuator:
@@ -43,6 +45,10 @@ class TrvActuator:
         self.last_write_ts: float | None = None
         self._pending: asyncio.Task | None = None
         self.resolved = False
+        self._heat_try: float | None = None  # letzter Versuch, den Kopf auf Heizen zu stellen (Abweichung besteht)
+        self._sel_try: float | None = None  # dito externer Fühler
+        self.revived_ts: float | None = None  # zuletzt auf „Aus“ vorgefunden und wieder eingeschaltet
+        self.error_ts: float | None = None  # letzter fehlgeschlagener Befehl
 
     @property
     def kind(self) -> str:
@@ -74,6 +80,20 @@ class TrvActuator:
     def available(self) -> bool:
         st = self.hass.states.get(self.climate_id)
         return st is not None and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN)
+
+    def is_off(self) -> bool:
+        st = self.hass.states.get(self.climate_id)
+        return st is not None and st.state == HVACMode.OFF
+
+    def uncertain(self, now_ts: float) -> bool:
+        """Beim aktiven Regeln: steht das Ventil womöglich nicht dort, wo wir es hingestellt haben?
+        (Kopf aus bzw. nicht erreichbar, Befehl fehlgeschlagen oder nicht übernommen.)"""
+        return (
+            not self.available()
+            or self.is_off()
+            or (self.error_ts is not None and now_ts - self.error_ts < ERROR_HOLD_S)
+            or self.write_mismatch(now_ts)
+        )
 
     def write_mismatch(self, now_ts: float, grace_s: float = 900.0) -> bool:
         """TRVZB: meldet der Kopf eine Viertelstunde nach dem Befehl eine andere Öffnung zurück?
@@ -126,23 +146,38 @@ class TrvActuator:
         await self.hass.services.async_call("number", "set_value", {ATTR_ENTITY_ID: eid, "value": value}, blocking=True)
         return True
 
-    async def take_control(self) -> None:
-        """TRV in Heizbetrieb bringen und Regelung auf externen Sensor stellen (einmalig)."""
+    async def ensure_control(self, now_ts: float, first: bool = False) -> None:
+        """TRV in Heizbetrieb halten und auf externen Sensor stellen – bei jedem Regeltakt geprüft,
+        denn ein Kopf kann später ausgeschaltet werden (von Hand, Automation, nach Batteriewechsel)
+        oder beim Übernehmen nicht erreichbar gewesen sein. Geschrieben wird nur bei Abweichung:
+        sofort, wenn sie neu ist; bleibt sie bestehen (Kopf übernimmt nicht), erst nach REASSERT_S."""
         if not self.resolved:
             self.resolve()
+        if not self.available():
+            return
         st = self.hass.states.get(self.climate_id)
         if st is not None and st.state == HVACMode.OFF:
-            await self.hass.services.async_call(
-                "climate", "set_hvac_mode", {ATTR_ENTITY_ID: self.climate_id, "hvac_mode": HVACMode.HEAT}, blocking=True
-            )
+            if self._heat_try is None or now_ts - self._heat_try >= REASSERT_S:
+                self._heat_try = now_ts
+                if not first:
+                    self.revived_ts = now_ts
+                    _LOGGER.warning("TRV %s stand auf Aus – wieder auf Heizen gestellt", self.climate_id)
+                await self.hass.services.async_call(
+                    "climate", "set_hvac_mode", {ATTR_ENTITY_ID: self.climate_id, "hvac_mode": HVACMode.HEAT}, blocking=True
+                )
+        else:
+            self._heat_try = None
         sel = self.entities.get("select")
-        if sel:
-            sst = self.hass.states.get(sel)
-            opts = (sst.attributes.get("options") if sst else None) or []
-            if sst is not None and sst.state != "external" and "external" in opts:
+        sst = self.hass.states.get(sel) if sel else None
+        opts = (sst.attributes.get("options") if sst else None) or []
+        if sst is not None and sst.state != "external" and "external" in opts:
+            if self._sel_try is None or now_ts - self._sel_try >= REASSERT_S:
+                self._sel_try = now_ts
                 await self.hass.services.async_call(
                     "select", "select_option", {ATTR_ENTITY_ID: sel, "option": "external"}, blocking=True
                 )
+        else:
+            self._sel_try = None
 
     async def set_room_temperature(self, value: float) -> None:
         """Raumtemperatur an den TRV spiegeln (Anzeige am Kopf stimmt dann)."""
@@ -173,6 +208,15 @@ class TrvActuator:
             )
             self.last_pct = pct
 
+    async def resync(self, now_ts: float) -> None:
+        """TRVZB meldet eine andere Öffnung als befohlen (z. B. war er beim Befehl nicht erreichbar)
+        → Befehl wiederholen. write_mismatch wartet 15 min nach jedem Schreiben, das begrenzt die
+        Wiederholungen."""
+        if self.kind != "trvzb" or self.last_pct is None or not self.available() or not self.write_mismatch(now_ts):
+            return
+        await self._write_trvzb(self.last_pct)
+        self.last_write_ts = now_ts
+
     async def _write_trvzb(self, pct: int) -> None:
         await self._number("open", pct)
         await self._number("close", 100 - pct)
@@ -202,3 +246,4 @@ class TrvActuator:
             "climate", "set_temperature", {ATTR_ENTITY_ID: self.climate_id, "temperature": fallback_temp}, blocking=True
         )
         self.last_pct = None
+        self.revived_ts = self.error_ts = self._heat_try = self._sel_try = None

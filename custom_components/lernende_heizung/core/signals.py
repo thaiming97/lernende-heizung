@@ -136,7 +136,11 @@ class SunModel:
 # ----------------------------------------------------------------------------- Raumsensor
 @dataclass
 class RoomSensorFilter:
-    """Ersetzt unplausible Spitzen des Hauptsensors (z. B. direkte Sonne)."""
+    """Ersetzt unplausible Spitzen des Hauptsensors (z. B. direkte Sonne).
+
+    Die Anstiegsgrenze gilt nur, wenn die Sonne scheinen kann und kein Fenster gerade offen war:
+    Nach dem Lüften (oder beim Duschen) wird die Luft ganz echt schnell wieder warm – das darf
+    nicht als Spitze festgehalten werden, sonst heizt der Regler gegen einen Phantom-Einbruch."""
 
     max_rise_kph: float = 1.5  # schneller kann der Raum nicht wärmer werden
     max_offset: float = 1.0  # K Abweichung zum Zweitsensor
@@ -146,7 +150,10 @@ class RoomSensorFilter:
     last_ts: float | None = None
     disturbed: bool = False
 
-    def update(self, ts: float, primary: float | None, secondary: float | None) -> float | None:
+    def update(
+        self, ts: float, primary: float | None, secondary: float | None, *, sun: bool = True, settling: bool = False
+    ) -> float | None:
+        """sun: direkte Sonne möglich; settling: Fenster war gerade offen (Raum erholt sich)."""
         if primary is None:
             self.disturbed = False
             return None if secondary is None else secondary + self.offset
@@ -155,11 +162,11 @@ class RoomSensorFilter:
             d = primary - secondary
             if self.n >= 30 and d - self.offset > self.max_offset:
                 spike = True
-            elif not spike:
+            elif not settling:  # nach dem Lüften erholen sich die Räume unterschiedlich schnell
                 self.n += 1
                 a = max(0.002, 1.0 / self.n)
                 self.offset += a * (d - self.offset)
-        if self.last_ok is not None and self.last_ts is not None:
+        if sun and not settling and self.last_ok is not None and self.last_ts is not None:
             dt = (ts - self.last_ts) / 3600.0
             if 0 < dt < 1 and primary - self.last_ok > self.max_rise_kph * dt + 0.3:
                 spike = True
@@ -178,14 +185,17 @@ class SupplyLearner:
     """Heizkurve aus einem Rohrfühler am Heizkörper: lernt Tvl = a + b·Tout bei offenem Ventil,
     dazu einen Versatz je Tagesstunde (Nachtabsenkung des Kessels).
 
-    Der Fühler zeigt den Vorlauf nur, wenn Wasser fließt: Ventil ≥ 30 % seit 20 min und Rohr
-    deutlich wärmer als der Raum. Bleibt das Rohr trotz offenem Ventil kalt, liefert der Kessel
-    gerade keine Wärme (``no_heat``)."""
+    Der Fühler zeigt den Vorlauf nur, wenn Wasser fließt: Ventil ≥ 8 % seit 20 min und Rohr
+    deutlich wärmer als der Raum. (Früher 30 % – in einer gut gedämmten Wohnung steht das Ventil
+    laut Simulation nur 0,4 % der Zeit so weit offen, ≥ 8 % dagegen rund ein Drittel der Zeit.)
+    Bleibt das Rohr trotz weit offenem Ventil (≥ 30 %, 30 min) kalt, liefert der Kessel gerade keine
+    Wärme (``no_heat``); bei kleiner Öffnung wäre das nicht eindeutig (wenig Durchfluss)."""
 
     a: float = 47.0
     b: float = -0.8
     n: int = 0
     open_since: float | None = None
+    wide_since: float | None = None
     _sxx: float = 0.0
     _sx: float = 0.0
     _sy: float = 0.0
@@ -200,6 +210,8 @@ class SupplyLearner:
 
     FLOW_MIN_K = 5.0  # Rohr so viel wärmer als der Raum → es fließt Heizwasser
     COLD_K = 3.0  # darunter trotz offenem Ventil: Kessel liefert nichts
+    OPEN_MIN = 0.08  # ab dieser Ventilöffnung zählt der Rohrfühler als Vorlauf
+    COLD_OPEN_MIN = 0.3  # „Kessel kalt“ nur bei weit offenem Ventil
     HOUR_MIN_N = 5
 
     def measured(self, ts: float, max_age_s: float = 900.0) -> float | None:
@@ -239,16 +251,21 @@ class SupplyLearner:
     ) -> None:
         if pipe is None or t_out is None:
             return
-        if valve < 0.3:
-            self.open_since = None
+        if valve < self.OPEN_MIN:
+            self.open_since = self.wide_since = None
             return
+        if valve < self.COLD_OPEN_MIN:
+            self.wide_since = None
+        elif self.wide_since is None:
+            self.wide_since = ts
         if self.open_since is None:
             self.open_since = ts
             return
         if ts - self.open_since < 20 * 60:
             return
         if t_room is not None:
-            if pipe - t_room < self.COLD_K and ts - self.open_since >= 30 * 60:
+            wide_long = self.wide_since is not None and ts - self.wide_since >= 30 * 60
+            if pipe - t_room < self.COLD_K and wide_long:
                 self.no_heat, self.no_heat_ts = True, ts
                 self.last_valid, self.last_valid_ts = pipe, ts  # tatsächlich kommt kaum Wärme an
                 return

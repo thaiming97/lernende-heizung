@@ -91,9 +91,7 @@ def _parse_days(s: str) -> set[int]:
             return set(range(7))
         if "-" in tok:
             a, b = tok.split("-", 1)
-            if a[:2] not in DAYS or b[:2] not in DAYS:
-                raise ScheduleError(f"Tag unbekannt: {tok}")
-            ia, ib = DAYS[a[:2]], DAYS[b[:2]]
+            ia, ib = _day(a, tok), _day(b, tok)
             k = ia
             while True:
                 out.add(k)
@@ -101,10 +99,16 @@ def _parse_days(s: str) -> set[int]:
                     break
                 k = (k + 1) % 7
         else:
-            if tok[:2] not in DAYS:
-                raise ScheduleError(f"Tag unbekannt: {tok}")
-            out.add(DAYS[tok[:2]])
+            out.add(_day(tok, tok))
     return out
+
+
+def _day(name: str, tok: str) -> int:
+    """Wochentag aus deutschem (Mo, Montag) oder englischem Namen (Tue, Tuesday)."""
+    for key in (name[:3], name[:2]):
+        if key in DAYS:
+            return DAYS[key]
+    raise ScheduleError(f"Tag unbekannt: {tok}")
 
 
 def local_dt(ts: float, tz: str) -> datetime:

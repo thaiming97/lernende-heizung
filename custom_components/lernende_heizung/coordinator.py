@@ -50,6 +50,7 @@ from .const import (
     DOMAIN,
     FALLBACK_MIN_SAMPLES,
     FALLBACK_RMSE,
+    HEATING_LIMIT_HYST,
     PARAM_REFRESH_S,
     PRESENCE_AWAY,
     PRESENCE_HOME,
@@ -66,8 +67,10 @@ from .const import (
     SENSOR_STALE_S,
     SUPPLY_STALE_S,
     STORE_SAVE_DELAY_S,
+    STORE_SAVE_INTERVAL_S,
     STORE_VERSION,
     WINDOW_LEARN_PAUSE_S,
+    WINDOW_SETTLE_S,
 )
 from .core.actuator import ValveGate
 from .core.controller import (
@@ -96,6 +99,8 @@ _LOGGER = logging.getLogger(__name__)
 REASON_SUMMER = "sommer"
 REASON_OBSERVE = "beobachten"
 FROST_C = 7.0
+SUN_DIRECT_KW = 0.05  # kW/m² direkte Sonne auf einer Fassade → Sonnenspitzen am Raumsensor möglich
+TRV_NOTICE_S = 3600  # so lange bleibt „Thermostat stand auf Aus“ in der Problemliste
 
 
 def _num(hass: HomeAssistant, entity_id: str | None, max_age_s: float | None = None) -> float | None:
@@ -218,6 +223,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.zones: dict[str, Zone] = {}
         self._unsubs: list = []
         self._last_ts: float | None = None
+        self._saved_ts = 0.0
         self._build_zones()
 
     # ------------------------------------------------------------------ Aufbau
@@ -280,6 +286,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "master_on": self.master_on,
             "presence": self.presence,
             "season": self.season,
+            "heating_season": self.heating_season,
             "return_at": self.return_at.isoformat() if self.return_at else None,
             "fusion": self.fusion.export(),
             "supply": self.supply.export(),
@@ -302,6 +309,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.presence = raw["presence"]
         if raw.get("season") in SEASON_OPTIONS:
             self.season = raw["season"]
+        self.heating_season = bool(raw.get("heating_season", True))
         if raw.get("return_at"):
             self.return_at = dt_util.parse_datetime(raw["return_at"])
         self.fusion.restore(raw.get("fusion", {}))
@@ -331,6 +339,10 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def target_at(self, z: Zone, ts: float) -> Target:
         if z.hvac_off:
             return Target(FROST_C, False)
+        # Von Hand verstellte Temperatur gilt bis zum nächsten Zeitplanwechsel – auch bei Preset
+        # oder Abwesenheit (vorher wurde sie dort stillschweigend ignoriert)
+        if z.override is not None and z.override_until and ts < z.override_until:
+            return Target(z.override, True)
         if self.presence == PRESENCE_AWAY:
             return Target(z.away, False)
         if self.presence == PRESENCE_VACATION and self.return_at and ts < self.return_at.timestamp():
@@ -343,8 +355,6 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return Target(z.eco, False)
         if z.preset == PRESET_AWAY:
             return Target(z.away, False)
-        if z.override is not None and z.override_until and ts < z.override_until:
-            return Target(z.override, True)
         local = dt_util.as_local(dt_util.utc_from_timestamp(ts))
         return Target(z.comfort, True) if z.schedule.is_comfort(local) else Target(z.eco, False)
 
@@ -443,16 +453,22 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.presence = PRESENCE_HOME
 
         # Raumtemperaturen (gefiltert), Fenster, Ventilstellung
+        sun_direct = max(self.sun_now) > SUN_DIRECT_KW
         for z in self.zones.values():
-            prim = _num(self.hass, z.cfg.get(CONF_TEMP), SENSOR_STALE_S)
-            sec = _num(self.hass, z.cfg.get(CONF_TEMP2), SENSOR_STALE_S)
-            z.primary_missing = prim is None
-            z.temp = z.filt.update(now_ts, prim, sec)
             z.window_open = any(
                 (st := self.hass.states.get(w)) is not None and st.state == STATE_ON for w in z.cfg.get(CONF_WINDOWS, [])
             )
+            if z.window_open:
+                z.last_window_ts = now_ts
+            prim = _num(self.hass, z.cfg.get(CONF_TEMP), SENSOR_STALE_S)
+            sec = _num(self.hass, z.cfg.get(CONF_TEMP2), SENSOR_STALE_S)
+            z.primary_missing = prim is None
+            # Spitzenfilter nur, wenn Sonne auf den Sensor fallen kann – und nicht, während sich der Raum
+            # vom Lüften erholt (die Luft wird dann echt schnell wieder warm)
+            settling = now_ts - z.last_window_ts < WINDOW_SETTLE_S
+            z.temp = z.filt.update(now_ts, prim, sec, sun=sun_direct, settling=settling)
             z.controlling = self.master_on and z.active
-            z.valve_frac = self._valve_frac(z)
+            z.valve_frac = self._valve_frac(z, now_ts)
 
         # Vorlauf: Rohrfühler am Heizkörper der gewählten Zone (zählt nur, wenn dort Wasser fließt)
         supply_t = _num(self.hass, opts.get(CONF_SUPPLY), SUPPLY_STALE_S)
@@ -469,10 +485,15 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif self.season == SEASON_WINTER:
             summer = False
         else:
-            summer = (
-                self.t_out_mean24 is not None
-                and self.t_out_mean24 > float(opts.get(CONF_HEATING_LIMIT, DEFAULT_HEATING_LIMIT))
-            )
+            # Heizgrenze mit Schaltabstand: erst 0,5 K darüber Sommer, erst 0,5 K darunter wieder Winter
+            limit = float(opts.get(CONF_HEATING_LIMIT, DEFAULT_HEATING_LIMIT))
+            m = self.t_out_mean24
+            if m is None:
+                summer = False
+            elif self.heating_season:
+                summer = m > limit + HEATING_LIMIT_HYST
+            else:
+                summer = m >= limit - HEATING_LIMIT_HYST
         self.heating_season = not summer
         dt_h = 0.0 if self._last_ts is None else min(1.0, (now_ts - self._last_ts) / 3600)
         self._last_ts = now_ts
@@ -491,7 +512,6 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # der Zug zum Startwert würde das Gelernte über die Heizkörper langsam vergessen.
             if z.window_open:
                 z.learner.block(now_ts + WINDOW_LEARN_PAUSE_S)
-                z.last_window_ts = now_ts
             if summer:
                 z.learner.block(now_ts + CYCLE_S)
             elif valve_frac is not None:
@@ -531,14 +551,20 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._update_saving(z, now_ts, x)
             self._describe(z, now_ts, summer)
 
-        self.schedule_save()
+        # Gelerntes in festem Abstand sichern (Absturz, Stromausfall); Bedienung speichert zusätzlich
+        if now_ts - self._saved_ts >= STORE_SAVE_INTERVAL_S:
+            self._saved_ts = now_ts
+            self.store.async_delay_save(self._export, 0)
         return {"ts": now_ts}
 
-    def _valve_frac(self, z: Zone) -> float | None:
+    def _valve_frac(self, z: Zone, now_ts: float) -> float | None:
         """Ventilstellung 0..1: gestellt (aktiv) bzw. am TRV abgelesen (beobachten); None = unbekannt."""
-        if z.trvs and not any(t.available() for t in z.trvs):
-            return None  # kein Thermostat erreichbar → wir wissen nicht, was das Ventil macht
-        if z.controlling:
+        if any(not t.available() for t in z.trvs):
+            return None  # ein Thermostat nicht erreichbar → wir wissen nicht, was die Zone heizt
+        if z.controlling and z.controlled:
+            # Kopf aus, Befehl fehlgeschlagen oder nicht übernommen → Stellung unsicher, nicht lernen
+            if any(t.uncertain(now_ts) for t in z.trvs):
+                return None
             return z.valve_pct / 100
         obs = [v for t in z.trvs if (v := t.observed_valve()) is not None]
         z.valve_obs = sum(obs) / len(obs) if obs else None
@@ -593,7 +619,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         paused = None
         if not summer:
             if z.valve_frac is None:
-                paused = "Ventilstellung unbekannt (Thermostat nicht erreichbar)"
+                paused = "Ventilstellung unsicher (Thermostat nicht erreichbar, aus oder Befehl nicht angekommen)"
             elif z.temp is None:
                 paused = "kein Raumwert"
             elif not z.window_open and now_ts < z.learner.blocked_until:
@@ -643,8 +669,14 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for t in z.trvs:
             if not t.available():
                 probs.append(f"Thermostat {t.climate_id} nicht erreichbar")
+            elif z.controlling and t.is_off():
+                probs.append(f"Thermostat {t.climate_id} steht auf Aus – wird wieder eingeschaltet")
             elif z.controlling and t.write_mismatch(now_ts):
                 probs.append(f"Thermostat {t.climate_id} übernimmt die Ventilstellung nicht")
+            elif z.controlling and t.revived_ts is not None and now_ts - t.revived_ts < TRV_NOTICE_S:
+                probs.append(f"Thermostat {t.climate_id} stand auf Aus und wurde wieder eingeschaltet")
+            if z.controlling and t.error_ts is not None and now_ts - t.error_ts < TRV_NOTICE_S:
+                probs.append(f"Thermostat {t.climate_id}: Befehl fehlgeschlagen")
         if d and d.reason == "rueckfall":
             probs.append("Sicherheitsbetrieb – Modell passt gerade nicht")
         if heat_missing:
@@ -669,19 +701,26 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             z.valve_pct = 0
             return
         want = int(round(100 * dec.valve))
-        force = not z.controlled or dec.reason in ("fenster", "frostschutz")
+        first = not z.controlled
+        force = first or dec.reason in ("fenster", "frostschutz")
         sent = z.gate.decide(now_ts, want, force=force)
+        send_ext = z.temp is not None and (z.last_ext_temp is None or abs(z.temp - z.last_ext_temp) >= 0.3)
+        all_ok = True
         for t in z.trvs:
             try:
-                if not z.controlled:
-                    await t.take_control()
+                # jedes Mal prüfen: Kopf kann inzwischen aus sein oder war beim Übernehmen nicht erreichbar
+                await t.ensure_control(now_ts, first=first)
                 if sent is not None:
                     await t.set_valve(sent)
-                if z.temp is not None and (z.last_ext_temp is None or abs(z.temp - z.last_ext_temp) >= 0.3):
+                else:
+                    await t.resync(now_ts)  # Befehl nicht angekommen → noch einmal senden
+                if send_ext:
                     await t.set_room_temperature(z.temp)
             except Exception as err:  # noqa: BLE001 – ein TRV darf die anderen nicht blockieren
+                t.error_ts = now_ts
+                all_ok = False
                 _LOGGER.warning("%s: TRV %s nicht erreichbar: %s", z.name, t.climate_id, err)
-        if z.temp is not None and (z.last_ext_temp is None or abs(z.temp - z.last_ext_temp) >= 0.3):
+        if send_ext and all_ok:
             z.last_ext_temp = z.temp
         z.controlled = True
         if sent is not None:

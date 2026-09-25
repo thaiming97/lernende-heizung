@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.5.1"
+VERSION: Final = "0.5.2"
 
 PLATFORMS: Final = ["binary_sensor", "button", "climate", "datetime", "select", "sensor", "switch"]
 
@@ -45,10 +45,15 @@ DEFAULT_AREA: Final = 15.0
 CYCLE_S: Final = 300
 REPLAN_S: Final = 900
 WINDOW_LEARN_PAUSE_S: Final = 1800
+WINDOW_SETTLE_S: Final = 3600  # so lange nach dem Lüften erholt sich die Raumluft (kein Spitzenfilter)
 SENSOR_STALE_S: Final = 3 * 3600  # Raumsensor ohne Meldung → als ausgefallen behandeln
 SUPPLY_STALE_S: Final = 2 * 3600  # Vorlauffühler ohne Meldung → Wert nicht mehr verwenden
+HEATING_LIMIT_HYST: Final = 0.5  # K um die Heizgrenze, damit die Automatik nicht hin- und herschaltet
 STORE_VERSION: Final = 1
-STORE_SAVE_DELAY_S: Final = 600
+STORE_SAVE_DELAY_S: Final = 30  # nach Bedienung (Schalter, Sollwert …)
+# Laufender Stand (Gelerntes) in festem Abstand speichern. Nicht im Regeltakt „verzögert speichern“:
+# HA verschiebt den Termin bei jedem Aufruf, bei 5-min-Takt würde nur beim Beenden geschrieben.
+STORE_SAVE_INTERVAL_S: Final = 900
 PARAM_REFRESH_S: Final = 6 * 3600
 FALLBACK_RMSE: Final = 0.5  # K/h Modellfehler, ab dem der einfache PI-Regler übernimmt
 FALLBACK_MIN_SAMPLES: Final = 200  # erst nach ~2 Tagen Lernen beurteilen

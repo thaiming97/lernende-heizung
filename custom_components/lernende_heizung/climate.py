@@ -92,6 +92,7 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
             z.manual = self.coordinator.target_at(z, time.time()).setpoint if z.manual is None else z.manual
         elif hvac_mode == HVACMode.AUTO:
             z.manual = None
+        z.override = None  # neue Betriebsart gilt sofort (Übersteuerung hat sonst Vorrang)
         await self._changed()
 
     async def async_turn_on(self) -> None:
@@ -107,6 +108,7 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
         z = self.zone
         if z.manual is not None:
             z.manual = float(temp)
+            z.override = None
         else:
             self.coordinator.set_override(z, float(temp))
         await self._changed()

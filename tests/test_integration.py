@@ -9,7 +9,8 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry, async_mock_service
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed, async_mock_service
 
 from custom_components.lernende_heizung import trv as trv_mod
 from custom_components.lernende_heizung.const import (
@@ -189,6 +190,92 @@ async def test_state_survives_restart(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
     z = entry.runtime_data.zones["bad"]
     assert z.active and z.energy_kwh >= 12.5
+
+async def test_learned_state_saved_while_running(hass: HomeAssistant, hass_storage, freezer) -> None:
+    """Bisher wurde im 5-min-Takt „verzögert gespeichert“ – HA verschob den Termin jedes Mal, geschrieben
+    wurde nur beim Beenden. Jetzt landet der Stand auch ohne Neustart regelmäßig auf der Platte."""
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    key = f"{DOMAIN}.{entry.entry_id}"
+    coord.zones["bad"].energy_kwh = 4.2
+    for _ in range(4):  # 20 min Regeltakt
+        freezer.tick(timedelta(minutes=5))
+        await coord.async_refresh()
+        async_fire_time_changed(hass, dt_util.utcnow())
+        await hass.async_block_till_done()
+    assert hass_storage[key]["data"]["zones"]["bad"]["energy_kwh"] >= 4.2
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_trv_switched_off_is_taken_back(hass: HomeAssistant) -> None:
+    """Kopf wird während der Regelung ausgeschaltet → sofort wieder Heizen, Problem, Lernpause."""
+    async_mock_service(hass, "number", "set_value")
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry = await _setup(hass)
+        coord = entry.runtime_data
+        hvac_calls = async_mock_service(hass, "climate", "set_hvac_mode")
+        hass.states.async_set("select.bad_temperature_sensor_select", "external", {"options": ["internal", "external"]})
+        await hass.services.async_call("switch", "turn_on", {"entity_id": _eid(hass, entry, "switch", "bad_active")}, blocking=True)
+        await hass.async_block_till_done()
+        assert hvac_calls == []  # stand schon auf Heizen
+        hass.states.async_set("climate.bad", "off", {"min_temp": 4, "max_temp": 35})
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert [c.data["hvac_mode"] for c in hvac_calls] == ["heat"]
+        probs = hass.states.get("binary_sensor.bad_problem_lh").attributes["probleme"]
+        assert any("Aus" in p for p in probs)
+        assert coord.zones["bad"].valve_frac is None  # Stellung unsicher → nicht lernen
+        # übernimmt der Kopf nicht, wird nicht bei jedem Takt erneut geschrieben
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert len(hvac_calls) == 1
+        # wieder an → Meldung bleibt eine Weile als Hinweis, Lernen läuft weiter
+        hass.states.async_set("climate.bad", "heat", {"min_temp": 4, "max_temp": 35})
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert coord.zones["bad"].valve_frac is not None
+        assert any("wieder eingeschaltet" in p for p in hass.states.get("binary_sensor.bad_problem_lh").attributes["probleme"])
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_temperature_change_works_with_preset_and_presence(hass: HomeAssistant) -> None:
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    cid = _eid(hass, entry, "climate", "bad_climate")
+    await hass.services.async_call("climate", "set_preset_mode", {"entity_id": cid, "preset_mode": "eco"}, blocking=True)
+    await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 24.0}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).attributes["temperature"] == 24.0  # vorher: blieb auf Eco (21,5)
+    # Anwesenheitswechsel beendet die Übersteuerung
+    await hass.services.async_call(
+        "select", "select_option", {"entity_id": _eid(hass, entry, "select", "presence"), "option": "abwesend"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).attributes["temperature"] == 17.0
+    # Handbetrieb: neue Temperatur gilt sofort
+    await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 22.0}, blocking=True)
+    await hass.services.async_call(
+        "select", "select_option", {"entity_id": _eid(hass, entry, "select", "presence"), "option": "zuhause"}, blocking=True
+    )
+    await hass.services.async_call("climate", "set_hvac_mode", {"entity_id": cid, "hvac_mode": "heat"}, blocking=True)
+    await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 20.5}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).attributes["temperature"] == 20.5
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_heating_limit_has_hysteresis(hass: HomeAssistant) -> None:
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    for mean, winter in ((16.3, True), (16.6, False), (16.0, False), (15.6, False), (15.4, True), (16.4, True)):
+        coord.t_out_mean24 = mean
+        with patch.object(coord.fusion, "update", return_value=None):  # kein Außenwert → Mittel bleibt stehen
+            await coord.async_refresh()
+        assert coord.heating_season is winter, mean
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
 
 async def test_stale_room_sensor_counts_as_missing(hass: HomeAssistant, freezer) -> None:
     hass.states.async_set("sensor.raum", "21.0")

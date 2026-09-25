@@ -69,6 +69,13 @@ def test_schedule_errors(bad):
         WeekSchedule.parse(bad)
 
 
+def test_schedule_day_names_german_and_english():
+    de = WeekSchedule.parse("Di,Do 08:00-09:00; Mittwoch 10:00-11:00; So 12:00-13:00")
+    en = WeekSchedule.parse("Tue,Thu 08:00-09:00; Wednesday 10:00-11:00; Sun 12:00-13:00")
+    assert de.slots == en.slots
+    assert WeekSchedule.parse("Mon-Sun 07:00-08:00").slots == WeekSchedule.parse("täglich 07:00-08:00").slots
+
+
 # ----------------------------------------------------------------------------- Modell
 def test_model_heats_and_cools():
     p = ZoneParams()
@@ -286,6 +293,28 @@ def test_room_filter_replaces_sun_spike():
     assert flt.disturbed and abs(val - 22.1) < 0.2
 
 
+def _airing(flt: RoomSensorFilter, settle_min: float, sun: bool) -> list[float]:
+    """Bad lüften: 10 min Fenster auf (−2 K), danach erholt sich die Luft in ~20 min (kein Zweitsensor)."""
+    out = []
+    for k in range(-6, 16):
+        ts = k * 300.0
+        real = 23.5 if k < 0 else (23.5 - k if k <= 2 else 23.3 - 1.8 * math.exp(-(k - 2) / 2.5))
+        settling = 0 <= k and (k - 2) * 5 < settle_min
+        out.append(flt.update(ts, round(real, 1), None, sun=sun, settling=settling))
+    return out
+
+
+def test_room_filter_follows_recovery_after_airing():
+    # Früher: kalter Wert blieb ~70 min stehen → Regler heizte voll gegen einen Phantom-Einbruch
+    held = _airing(RoomSensorFilter(), settle_min=0, sun=True)
+    assert held[-5] < 22.0
+    free = _airing(RoomSensorFilter(), settle_min=60, sun=True)
+    assert free[-5] > 23.0 and free[-12] > 22.0
+    # ohne Sonne kein Anstiegsfilter (z. B. Duschen am Abend)
+    night = _airing(RoomSensorFilter(), settle_min=0, sun=False)
+    assert night[-12] > 22.0
+
+
 def test_supply_learner_curve():
     sl = SupplyLearner()
     ts = 0.0
@@ -356,6 +385,25 @@ def test_supply_learner_night_setback_and_cold_boiler():
     sl2 = SupplyLearner()
     sl2.restore(raw)
     assert sl2.night_setback() == nb
+
+
+def test_supply_learner_small_openings():
+    """Gut gedämmte Wohnung: Ventil meist nur 8–15 % offen – der Fühler muss trotzdem messen, darf
+    bei kleiner Öffnung aber keinen kalten Kessel melden (wenig Durchfluss, Rohr kühlt ab)."""
+    sl = SupplyLearner()
+    ts = 0.0
+    for _ in range(6):  # 30 min bei 10 %
+        sl.update(ts, 43.0, 2.0, 0.10, t_room=21.0, hour=12)
+        ts += 300
+    assert sl.measured(ts) == 45.0 and sl.n > 0
+    for _ in range(12):  # Rohr kalt, aber nur 10 % offen → unklar, kein Alarm
+        sl.update(ts, 22.0, 2.0, 0.10, t_room=21.0, hour=12)
+        ts += 300
+    assert not sl.heat_missing(ts)
+    for _ in range(8):  # weit offen und trotzdem kalt → Kessel liefert nichts
+        sl.update(ts, 22.0, 2.0, 0.5, t_room=21.0, hour=12)
+        ts += 300
+    assert sl.heat_missing(ts)
 
 
 def test_curve_change_keeps_learned_heating_effect():
