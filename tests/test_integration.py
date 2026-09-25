@@ -382,7 +382,19 @@ async def test_supply_sensor_learns_in_observe_mode(hass: HomeAssistant, freezer
     assert coord.supply.n > 0
     sup = hass.states.get("sensor.vorlauf_lh")
     assert sup.attributes["quelle"] == "gemessen" and float(sup.state) == 47.0  # Rohr + 2 K
+    assert sup.attributes["rohrfuehler"] == 45.0 and sup.attributes["rohrfuehler_status"].startswith("zählt –")
     assert "gemessen" in hass.states.get("sensor.bad_erklaerung_lh").attributes["vorlauf_quelle"]
+    # Kopf aus → Ventil zu → Rohrwert wird angezeigt, zählt aber nicht (mit Grund)
+    hass.states.async_set("climate.bad", "off", {"min_temp": 4, "max_temp": 35})
+    for _ in range(4):
+        freezer.tick(timedelta(minutes=5))
+        for eid, val in (("sensor.rohr", "30.0"), ("sensor.bad_temp", "20.0")):
+            hass.states.async_set(eid, val, {"unit_of_measurement": "°C", "device_class": "temperature"}, force_update=True)
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+    sup = hass.states.get("sensor.vorlauf_lh")
+    assert sup.attributes["quelle"] == "Heizkurve" and sup.attributes["rohrfuehler"] == 30.0
+    assert sup.attributes["rohrfuehler_status"] == "zählt nicht – Ventil Bad zu"
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 

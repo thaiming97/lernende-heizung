@@ -188,6 +188,9 @@ class SupplySensor(HubEntity, SensorEntity):
             "messungen": s.n,
             "kessel_liefert_waerme": not s.heat_missing(now),
         }
+        if c.supply_note is not None:  # Vorlauffühler eingetragen
+            attrs["rohrfuehler"] = None if c.supply_pipe is None else round(c.supply_pipe, 1)
+            attrs["rohrfuehler_status"] = c.supply_note
         nb = s.night_setback()
         if nb:
             attrs["nachtabsenkung"] = f"{nb[0]:02d}–{(nb[1] + 1) % 24:02d} Uhr, ca. {nb[2]:.0f} K".replace(".", ",")

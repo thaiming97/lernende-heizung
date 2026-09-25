@@ -4,6 +4,16 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.5.3 – 2026-09-25
+
+- Sensor „Vorlauf (geschätzt)“ heißt jetzt **„Vorlauf“**: Er zeigt den gemessenen Vorlauf, sobald
+  Heizwasser am Fühler fließt, sonst den Wert aus der Heizkurve (Attribut „quelle“).
+- Mit eingetragenem Vorlauffühler zeigt er zusätzlich den **aktuellen Rohrwert** (Attribut
+  „rohrfuehler“) und **warum er gerade zählt oder nicht** („rohrfuehler_status“, z. B. „zählt nicht –
+  Ventil Wohnen zu“).
+- Einstellungen: Der Fühler darf auch am Anfang eines Heizstrangs sitzen; die Zonenauswahl heißt
+  jetzt „Wasser fließt, wenn diese Zone heizt“.
+
 ## 0.5.2 – 2026-09-25
 
 Fehlerkorrekturen aus einer Überprüfung der Regellogik:

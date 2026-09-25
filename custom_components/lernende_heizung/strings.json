@@ -80,10 +80,10 @@
       },
       "supply": {
         "title": "Supply sensor (optional)",
-        "description": "Pipe sensor at a radiator; only valid while that valve is open.",
+        "description": "Pipe sensor on a supply pipe (at a radiator or at the start of a branch); only valid while water flows – choose the zone whose valve sends water through this pipe.",
         "data": {
           "supply_sensor": "Pipe sensor",
-          "supply_zone": "Radiator belongs to zone"
+          "supply_zone": "Water flows when this zone heats"
         }
       },
       "add_zone": {
@@ -202,7 +202,7 @@
         "name": "Outdoor temperature"
       },
       "supply": {
-        "name": "Supply temperature (estimated)"
+        "name": "Supply temperature"
       },
       "sun": {
         "name": "Solar irradiance"

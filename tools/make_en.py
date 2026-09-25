@@ -41,15 +41,15 @@ o = en["options"]["step"]
 o["init"] = {"title": "Settings", "menu_options": {"general": "Home (weather, outdoor, sun)", "supply": "Supply temperature sensor",
                                                   "add_zone": "Add zone", "edit_zone": "Edit zone", "remove_zone": "Remove zone"}}
 o["general"] = {"title": "Home", "data": gen}
-o["supply"] = {"title": "Supply sensor (optional)", "description": "Pipe sensor at a radiator; only valid while that valve is open.",
-               "data": {"supply_sensor": "Pipe sensor", "supply_zone": "Radiator belongs to zone"}}
+o["supply"] = {"title": "Supply sensor (optional)", "description": "Pipe sensor on a supply pipe (at a radiator or at the start of a branch); only valid while water flows – choose the zone whose valve sends water through this pipe.",
+               "data": {"supply_sensor": "Pipe sensor", "supply_zone": "Water flows when this zone heats"}}
 o["add_zone"] = {"title": "Add zone", "data": zd}
 o["zone_form"] = {"title": "Edit zone", "data": zd}
 o["edit_zone"] = {"title": "Edit zone", "data": {"zone": "Zone"}}
 o["remove_zone"] = {"title": "Remove zone", "data": {"zone": "Zone"}}
 names = {
     "master": "Control", "active": "Actively control", "presence": "Presence", "return_at": "Return from vacation",
-    "window": "Window open", "preheat": "Preheating", "outdoor": "Outdoor temperature", "supply": "Supply temperature (estimated)",
+    "window": "Window open", "preheat": "Preheating", "outdoor": "Outdoor temperature", "supply": "Supply temperature",
     "sun": "Solar irradiance", "valve": "Valve", "power": "Heating power", "energy": "Heating energy", "demand": "Heat demand",
     "forecast_1h": "Temperature in 1 h", "forecast_3h": "Temperature in 3 h", "preheat_start": "Next preheat start",
     "status": "Status", "saving": "Saving from setback", "learning": "Learning progress", "model_error": "Model error",

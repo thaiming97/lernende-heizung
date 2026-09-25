@@ -213,6 +213,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.supply = SupplyLearner()
         self.curve = HeatingCurve()
         self.t_supply: float | None = None
+        self.supply_pipe: float | None = None  # Rohwert des Vorlauffühlers (für die Anzeige)
+        self.supply_note: str | None = None  # warum der Fühler gerade zählt bzw. nicht
         self.t_out: float | None = None
         self.t_out_mean24: float | None = None
         self.sun_now: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -475,6 +477,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sz = self.zones.get(opts.get(CONF_SUPPLY_ZONE) or "")
         if supply_t is not None and sz is not None and sz.valve_frac is not None:
             self.supply.update(now_ts, supply_t, self.t_out, sz.valve_frac, t_room=sz.temp, hour=local.hour)
+        self.supply_pipe = supply_t
+        self.supply_note = self._supply_note(now_ts, supply_t, sz) if opts.get(CONF_SUPPLY) else None
         self._update_curve()
         t_out_now = self.t_out if self.t_out is not None else 5.0
         measured = self.supply.measured(now_ts)
@@ -569,6 +573,25 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         obs = [v for t in z.trvs if (v := t.observed_valve()) is not None]
         z.valve_obs = sum(obs) / len(obs) if obs else None
         return z.valve_obs
+
+    def _supply_note(self, now_ts: float, pipe: float | None, sz: Zone | None) -> str:
+        """Kurz und verständlich: zählt der Vorlauffühler gerade, und wenn nicht, warum?"""
+        s = self.supply
+        if pipe is None:
+            return "Fühler meldet sich nicht"
+        if sz is None:
+            return "keine Zone gewählt (Konfigurieren → Vorlauffühler)"
+        if s.heat_missing(now_ts):
+            return "Kessel liefert keine Wärme – Rohr kalt trotz offenem Ventil"
+        if s.measured(now_ts) is not None:
+            return "zählt – Heizwasser fließt"
+        if sz.valve_frac is None:
+            return f"zählt nicht – Ventilstellung {sz.name} unbekannt"
+        if sz.valve_frac < s.OPEN_MIN:
+            return f"zählt nicht – Ventil {sz.name} zu"
+        if s.open_since is not None and now_ts - s.open_since < 20 * 60:
+            return f"zählt gleich – Ventil {sz.name} erst seit {int((now_ts - s.open_since) // 60)} min offen"
+        return "zählt nicht – Rohr kaum wärmer als der Raum (fließt kein Heizwasser)"
 
     def _update_curve(self) -> None:
         """Heizkurve aus dem Vorlauffühler übernehmen (sobald genug gelernt); die Lerner rechnen

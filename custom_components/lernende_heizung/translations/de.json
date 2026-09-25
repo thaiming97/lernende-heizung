@@ -75,8 +75,8 @@
       },
       "supply": {
         "title": "Vorlauffühler (optional)",
-        "description": "Temperaturfühler am Vorlaufrohr eines Heizkörpers. Er zeigt den Vorlauf nur, wenn dieses Ventil offen ist – deshalb die Zone angeben, zu der der Heizkörper gehört.",
-        "data": {"supply_sensor": "Rohrfühler", "supply_zone": "Heizkörper gehört zur Zone"}
+        "description": "Temperaturfühler am Vorlaufrohr – an einem Heizkörper oder am Anfang eines Heizstrangs. Er zeigt den Vorlauf nur, wenn Heizwasser fließt – deshalb die Zone angeben, deren Ventil das Wasser durch dieses Rohr schickt (bei einem Strang: die Zone daran, die am meisten heizt).",
+        "data": {"supply_sensor": "Rohrfühler", "supply_zone": "Wasser fließt, wenn diese Zone heizt"}
       },
       "add_zone": {
         "title": "Zone hinzufügen",
@@ -121,7 +121,7 @@
     },
     "sensor": {
       "outdoor": {"name": "Außentemperatur"},
-      "supply": {"name": "Vorlauf (geschätzt)"},
+      "supply": {"name": "Vorlauf"},
       "sun": {"name": "Sonnenstrahlung"},
       "valve": {"name": "Ventil"},
       "power": {"name": "Heizleistung"},
