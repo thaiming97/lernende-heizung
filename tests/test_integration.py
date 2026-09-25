@@ -307,10 +307,22 @@ async def test_reset_learning_button(hass: HomeAssistant) -> None:
     z.learner.samples = 500
     z.controller.d = 0.4
     coord.fusion.bias[3] = 1.5  # Sensorabgleich bleibt
-    await hass.services.async_call("button", "press", {"entity_id": "button.lernen_zuruecksetzen_lh"}, blocking=True)
+    press = {"entity_id": "button.lernen_zuruecksetzen_lh"}
+    # erster Druck: nur Warnung, nichts passiert
+    await hass.services.async_call("button", "press", press, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.zones["bad"].learner.samples == 500
+    assert hass.states.get("button.lernen_zuruecksetzen_lh").attributes["wartet_auf_bestaetigung"] is True
+    # zweiter Druck innerhalb von 60 s: zurücksetzen
+    await hass.services.async_call("button", "press", press, blocking=True)
     await hass.async_block_till_done()
     z = coord.zones["bad"]
     assert z.learner.samples == 0 and z.controller.d == 0.0 and z.learner.progress() == 0
     assert coord.fusion.bias[3] == 1.5
     assert coord._export()["zones"]["bad"]["learner"]["samples"] == 0
+    # danach ist die Sicherung wieder scharf: ein einzelner Druck setzt nicht zurück
+    z.learner.samples = 7
+    await hass.services.async_call("button", "press", press, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.zones["bad"].learner.samples == 7
     assert await hass.config_entries.async_unload(entry.entry_id)

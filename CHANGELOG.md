@@ -4,6 +4,12 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.5.1 – 2026-09-25
+
+- „Gelerntes zurücksetzen“ mit Sicherung: Der erste Druck zeigt eine Warnung (unter
+  Benachrichtigungen), was verloren geht. Erst ein zweiter Druck innerhalb von 60 Sekunden setzt
+  wirklich zurück.
+
 ## 0.5.0 – 2026-09-25
 
 - Neuer Knopf **„Gelerntes zurücksetzen“**: verwirft das gelernte Wärmeverhalten aller Zonen und
