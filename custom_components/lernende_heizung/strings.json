@@ -133,6 +133,11 @@
     }
   },
   "entity": {
+    "button": {
+      "reset_learning": {
+        "name": "Reset learned model"
+      }
+    },
     "switch": {
       "master": {
         "name": "Control"

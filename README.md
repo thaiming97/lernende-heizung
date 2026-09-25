@@ -52,6 +52,9 @@ Auswahl „Heizsaison“: *Automatisch* entscheidet über die Heizgrenze (einste
 „Konfigurieren“ → Wohnung), *Winter* heizt immer, *Sommer* schaltet ab. Außerhalb der
 Heizperiode sind die Ventile zu und das Lernen pausiert; der Sensor „Heizperiode“ zeigt, was gilt.
 
+Läuft die Heizung im Haus noch nicht, obwohl es draußen schon kühl ist: Heizsaison auf *Sommer*.
+Sobald sie läuft: „Gelerntes zurücksetzen“ drücken und auf *Winter* oder *Automatisch* stellen.
+
 ## Umstieg von Better Thermostat
 
 Neue Zonen starten im **Beobachtungsmodus** (Schalter „Aktiv regeln“ aus): sie lernen mit,

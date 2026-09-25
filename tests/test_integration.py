@@ -297,3 +297,20 @@ async def test_supply_sensor_learns_in_observe_mode(hass: HomeAssistant, freezer
     assert sup.attributes["quelle"] == "gemessen" and float(sup.state) == 47.0  # Rohr + 2 K
     assert "gemessen" in hass.states.get("sensor.bad_erklaerung_lh").attributes["vorlauf_quelle"]
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_reset_learning_button(hass: HomeAssistant) -> None:
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    z = coord.zones["bad"]
+    z.learner.samples = 500
+    z.controller.d = 0.4
+    coord.fusion.bias[3] = 1.5  # Sensorabgleich bleibt
+    await hass.services.async_call("button", "press", {"entity_id": "button.lernen_zuruecksetzen_lh"}, blocking=True)
+    await hass.async_block_till_done()
+    z = coord.zones["bad"]
+    assert z.learner.samples == 0 and z.controller.d == 0.0 and z.learner.progress() == 0
+    assert coord.fusion.bias[3] == 1.5
+    assert coord._export()["zones"]["bad"]["learner"]["samples"] == 0
+    assert await hass.config_entries.async_unload(entry.entry_id)

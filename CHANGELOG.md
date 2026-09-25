@@ -4,6 +4,12 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.5.0 – 2026-09-25
+
+- Neuer Knopf **„Gelerntes zurücksetzen“**: verwirft das gelernte Wärmeverhalten aller Zonen und
+  beginnt bei den Startwerten neu – z. B. zum Start der Heizperiode, wenn bisher nur ohne Heizung
+  gelernt wurde. Der Abgleich der Sensoren und die Heizkurve aus dem Vorlauffühler bleiben.
+
 ## 0.4.0 – 2026-09-25
 
 **Vorlauffühler (Rohrfühler am Heizkörper)**

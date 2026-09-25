@@ -236,6 +236,21 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             z.trvs = [TrvActuator(self.hass, e) for e in zc.get(CONF_TRVS, [])]
             self.zones[zc[CONF_ZONE_ID]] = z
 
+    def reset_learning(self) -> None:
+        """Gelerntes Wärmeverhalten aller Zonen verwerfen und bei den Startwerten neu beginnen.
+
+        Bleibt erhalten: Abgleich der Sensoren (Außenfühler-Versatz, Sonne, Haupt-/Zweitsensor) und
+        die Heizkurve aus dem Vorlauffühler – die hängen nicht davon ab, ob geheizt wurde."""
+        for z in self.zones.values():
+            prior = prior_from_config(z.cfg)
+            z.learner = ZoneLearner(prior)
+            z.controller = ZoneController(prior, hour_of=z.controller.hour_of)
+            z.params_ts = 0.0
+            z.saving_pct = None
+        self._update_curve()  # Startwerte an die aktuelle Heizkurve anpassen
+        self.schedule_save()
+        _LOGGER.info("Gelerntes aller Zonen zurückgesetzt")
+
     async def async_setup(self) -> None:
         raw = await self.store.async_load() or {}
         self._restore(raw)

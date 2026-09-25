@@ -101,6 +101,7 @@
     }
   },
   "entity": {
+    "button": {"reset_learning": {"name": "Gelerntes zurücksetzen"}},
     "switch": {
       "master": {"name": "Regelung"},
       "active": {"name": "Aktiv regeln"}

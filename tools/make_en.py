@@ -56,7 +56,7 @@ names = {
     "time_constant": "Thermal mass time constant", "heat_gain": "Heating effect at full opening", "heat_loss": "Heat loss",
     "disturbance": "Short-term gains (cooking, visitors)",
     "base_gain": "Base internal gains",
-    "season": "Heating season", "heating_season": "Heating period", "explain": "Explanation", "problem": "Problem",
+    "season": "Heating season", "heating_season": "Heating period", "explain": "Explanation", "problem": "Problem", "reset_learning": "Reset learned model",
 }
 for ents in en["entity"].values():
     for k, v in ents.items():
