@@ -16,6 +16,10 @@ auch mit anderen Thermostatköpfen.
   3 h nicht → feste mittlere Öffnung; passt das gelernte Modell nicht zur Messung → einfacher
   PI-Regler (Status „Sicherheitsbetrieb“); Hauptschalter aus → Thermostatköpfe regeln wieder
   selbst, mit ihrem eingebauten Fühler.
+- **Erklärt sich selbst**: Sensor „Erklärung“ je Zone sagt in einem Satz, was die Regelung tut
+  und warum; als Attribute der 12-h-Plan und alle Kennzahlen. Sensor „Problem“ meldet Störungen.
+- **Vorlauffühler (optional)**: Rohrfühler am Vorlauf eines Heizkörpers – lernt die Heizkurve,
+  eine Nachtabsenkung des Kessels und erkennt, wenn der Kessel nichts liefert.
 - **Statistiken**: Heizleistung, Heizenergie, Wärmebedarf, Vorhersage 1 h/3 h, nächster
   Vorheizstart, Einsparung durch Absenkung, Lernfortschritt, Modellfehler, Zeitkonstante,
   Grundwärme (Personen, Geräte), geschätzter Vorlauf, Außentemperatur (Wetterdienst + eigener Fühler fusioniert).

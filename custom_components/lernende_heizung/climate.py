@@ -62,7 +62,8 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
     def hvac_action(self) -> HVACAction:
         if self.zone.hvac_off:
             return HVACAction.OFF
-        return HVACAction.HEATING if self.zone.valve_pct > 0 else HVACAction.IDLE
+        # tatsächliche Stellung – im Beobachtungsmodus die abgelesene
+        return HVACAction.HEATING if (self.zone.valve_frac or 0.0) > 0.02 else HVACAction.IDLE
 
     @property
     def preset_mode(self) -> str:

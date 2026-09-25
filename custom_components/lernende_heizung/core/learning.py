@@ -20,6 +20,7 @@ from .model import (
     ZoneParams,
     ZoneState,
     anchor_weights,
+    curve_rescale,
     effective_valve,
     radiator_factor,
 )
@@ -126,6 +127,8 @@ class ZoneLearner:
         self.resid_var = 0.02
         self.blocked_until = 0.0
         self.last_ts: float | None = None
+        # Heizkurve (Vorlauf bei −10/+15 °C), zu der die gelernte Heizwirkung h passt
+        self.curve_ref = (HeatingCurve().tvl_at_m10, HeatingCurve().tvl_at_p15)
 
     # -------------------------------------------------------------- Messungen
     def block(self, until_ts: float) -> None:
@@ -200,6 +203,38 @@ class ZoneLearner:
             self.best = best
         self.resid_var = 0.99 * self.resid_var + 0.01 * self.cands[self.best].score
 
+    def rescale_heat(self, f: tuple[float, float, float], estimates: bool = True) -> None:
+        """Heizwirkung h (je Außentemperatur-Anker) umskalieren, z. B. wenn die Heizkurve gelernt
+        wurde. Schätzwert, Startwert, Unsicherheit und Kovarianz werden konsistent mitgeführt.
+        estimates=False: nur Startwerte/Grenzen (nach dem Laden sind die Schätzwerte schon skaliert)."""
+        idx = (6, 7, 8)
+        scale = [1.0] * len(LIN)
+        for i, fi in zip(idx, f):
+            scale[i] = fi
+        self.prior = replace(self.prior, h=tuple(h * fi for h, fi in zip(self.prior.h, f)))
+        for c in self.cands:
+            r = c.rls
+            if estimates:
+                r.theta = [t * s for t, s in zip(r.theta, scale)]
+                r.P = [[r.P[i][j] * scale[i] * scale[j] for j in range(len(scale))] for i in range(len(scale))]
+            if r.prior:
+                r.prior = [t * s for t, s in zip(r.prior, scale)]
+            if r.p0:
+                r.p0 = [v * s * s for v, s in zip(r.p0, scale)]
+            r.upper = [u * max(1.0, s) for u, s in zip(r.upper, scale)]
+
+    def adopt_curve(self, curve: HeatingCurve) -> None:
+        """Neue Heizkurve übernehmen und die Heizwirkung so umrechnen, dass h·φ gleich bleibt."""
+        ref = (curve.tvl_at_m10, curve.tvl_at_p15)
+        if ref != self.curve_ref:
+            old = HeatingCurve(tvl_at_m10=self.curve_ref[0], tvl_at_p15=self.curve_ref[1])
+            f = curve_rescale(old, curve)
+            # erst ab 2 % umrechnen: die gelernte Kurve wandert mit jeder Messung ein wenig
+            if max(abs(v - 1.0) for v in f) >= 0.02:
+                self.rescale_heat(f)
+                self.curve_ref = ref
+        self.curve = curve
+
     # -------------------------------------------------------------- Ergebnis
     def params(self) -> ZoneParams:
         c = self.cands[self.best]
@@ -217,7 +252,7 @@ class ZoneLearner:
     def export(self) -> dict:
         return {
             "best": self.best, "samples": self.samples, "heat_samples": self.heat_samples,
-            "resid_var": self.resid_var, "last_ts": self.last_ts,
+            "resid_var": self.resid_var, "last_ts": self.last_ts, "curve_ref": list(self.curve_ref),
             "cands": [{"k_ma": c.k_ma, "valve_exp": c.valve_exp, "theta": c.rls.theta, "P": c.rls.P,
                        "score": c.score, "n": c.n,
                        "state": None if c.state is None else {"t": c.state.t, "tm": c.state.tm, "q": list(c.state.q)}}
@@ -251,6 +286,15 @@ class ZoneLearner:
             self.resid_var = float(raw["resid_var"])
             lt = raw.get("last_ts")
             self.last_ts = float(lt) if lt is not None and math.isfinite(float(lt)) else None
+            ref = raw.get("curve_ref")
+            if isinstance(ref, list) and len(ref) == 2 and all(math.isfinite(float(v)) for v in ref):
+                ref_t = (float(ref[0]), float(ref[1]))
+                if ref_t != self.curve_ref:
+                    # gespeicherte Schätzwerte passen schon zu ref; Startwerte/Grenzen nachziehen
+                    old = HeatingCurve(tvl_at_m10=self.curve_ref[0], tvl_at_p15=self.curve_ref[1])
+                    new = HeatingCurve(tvl_at_m10=ref_t[0], tvl_at_p15=ref_t[1])
+                    self.rescale_heat(curve_rescale(old, new), estimates=False)
+                    self.curve_ref = ref_t
         except (KeyError, TypeError, ValueError):
             return
 

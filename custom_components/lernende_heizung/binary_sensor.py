@@ -1,4 +1,4 @@
-"""Fenster offen und Vorheizen aktiv (je Zone), Heizperiode (Wohnung)."""
+"""Fenster offen, Vorheizen aktiv und Problem (je Zone), Heizperiode (Wohnung)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add:
     c = entry.runtime_data
     ents: list[BinarySensorEntity] = [HeatingSeasonSensor(c)]
     for z in c.zones.values():
-        ents += [WindowSensor(c, z), PreheatSensor(c, z)]
+        ents += [WindowSensor(c, z), PreheatSensor(c, z), ProblemSensor(c, z)]
     add(ents)
 
 
@@ -56,3 +56,22 @@ class HeatingSeasonSensor(HubEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         return self.coordinator.heating_season
+
+
+class ProblemSensor(ZoneEntity, BinarySensorEntity):
+    """An, wenn etwas nicht stimmt (Sensor/Thermostat weg, Befehl nicht angekommen, Sicherheitsbetrieb,
+    Kessel kalt); die Liste steht im Attribut „probleme“."""
+
+    _platform = "binary_sensor"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(self, coordinator: HeatingCoordinator, zone: Zone) -> None:
+        super().__init__(coordinator, zone, "problem")
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.zone.problems)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"probleme": list(self.zone.problems)}

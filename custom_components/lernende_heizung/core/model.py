@@ -41,16 +41,20 @@ def anchor_weights(t_out: float) -> tuple[float, float, float]:
 
 @dataclass
 class HeatingCurve:
-    """Vorlauftemperatur über Außentemperatur (linear, begrenzt)."""
+    """Vorlauftemperatur über Außentemperatur (linear, begrenzt), optional mit Versatz je
+    Tagesstunde (z. B. Nachtabsenkung des Kessels, gelernt aus dem Vorlauffühler)."""
 
     tvl_at_m10: float = 55.0
     tvl_at_p15: float = 35.0
     tvl_min: float = 28.0
     tvl_max: float = 70.0
+    hour_offset: tuple[float, ...] = ()  # 24 Werte in K (lokale Stunde), leer = keiner
 
-    def supply(self, t_out: float) -> float:
+    def supply(self, t_out: float, hour: int | None = None) -> float:
         slope = (self.tvl_at_p15 - self.tvl_at_m10) / 25.0
         tvl = self.tvl_at_m10 + slope * (t_out + 10.0)
+        if hour is not None and len(self.hour_offset) == 24:
+            tvl += self.hour_offset[hour % 24]
         return min(self.tvl_max, max(self.tvl_min, tvl))
 
 
@@ -60,6 +64,18 @@ def radiator_factor(t_supply: float, t_room: float) -> float:
     if excess <= 0:
         return 0.0
     return (excess / NOMINAL_EXCESS) ** RAD_EXP
+
+
+def curve_rescale(old: HeatingCurve, new: HeatingCurve, t_room: float = 21.0) -> tuple[float, float, float]:
+    """Faktoren für die gelernte Heizwirkung h an den Außentemperatur-Ankern, wenn sich die
+    angenommene Heizkurve ändert: h·φ soll gleich bleiben (h enthält sonst den alten Kurvenfehler)."""
+    out = []
+    for a in ANCHORS:
+        p_old = radiator_factor(old.supply(a), t_room)
+        p_new = radiator_factor(new.supply(a), t_room)
+        f = p_old / p_new if p_new > 1e-3 else 1.0
+        out.append(min(3.0, max(1 / 3, f)))
+    return (out[0], out[1], out[2])
 
 
 @dataclass

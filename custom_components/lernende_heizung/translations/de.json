@@ -110,7 +110,7 @@
       "season": {"name": "Heizsaison", "state": {"auto": "Automatisch (Heizgrenze)", "winter": "Winter (heizen)", "sommer": "Sommer (aus)"}}
     },
     "datetime": {"return_at": {"name": "Rückkehr aus dem Urlaub"}},
-    "binary_sensor": {"window": {"name": "Fenster offen"}, "preheat": {"name": "Vorheizen"}, "heating_season": {"name": "Heizperiode"}},
+    "binary_sensor": {"window": {"name": "Fenster offen"}, "preheat": {"name": "Vorheizen"}, "heating_season": {"name": "Heizperiode"}, "problem": {"name": "Problem"}},
     "climate": {
       "zone": {
         "state_attributes": {
@@ -144,7 +144,8 @@
       "heat_gain": {"name": "Heizwirkung bei voll offen"},
       "heat_loss": {"name": "Wärmeverlust"},
       "disturbance": {"name": "Störwärme kurzfristig (Kochen, Besuch)"},
-      "base_gain": {"name": "Grundwärme (Personen, Geräte)"}
+      "base_gain": {"name": "Grundwärme (Personen, Geräte)"},
+      "explain": {"name": "Erklärung"}
     }
   }
 }

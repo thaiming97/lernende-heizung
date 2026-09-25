@@ -99,8 +99,6 @@ ZONE_SENSORS: tuple[ZoneSensorDesc, ...] = (
 HUB_SENSORS: tuple[HubSensorDesc, ...] = (
     HubSensorDesc(key="outdoor", device_class=SensorDeviceClass.TEMPERATURE, native_unit_of_measurement=UnitOfTemperature.CELSIUS,
                   state_class=SensorStateClass.MEASUREMENT, value=lambda c: None if c.t_out is None else round(c.t_out, 1)),
-    HubSensorDesc(key="supply", device_class=SensorDeviceClass.TEMPERATURE, native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-                  state_class=SensorStateClass.MEASUREMENT, value=lambda c: None if (v := c.estimated_supply()) is None else round(v, 1)),
     HubSensorDesc(key="sun", device_class=SensorDeviceClass.IRRADIANCE, native_unit_of_measurement="W/m²",
                   state_class=SensorStateClass.MEASUREMENT, value=lambda c: round(1000 * c.sun_ghi)),
 )
@@ -108,9 +106,10 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
 
 async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add: AddConfigEntryEntitiesCallback) -> None:
     c = entry.runtime_data
-    ents: list[SensorEntity] = [HubSensor(c, d) for d in HUB_SENSORS]
+    ents: list[SensorEntity] = [HubSensor(c, d) for d in HUB_SENSORS] + [SupplySensor(c)]
     for z in c.zones.values():
         ents += [ZoneSensor(c, z, d) for d in ZONE_SENSORS]
+        ents.append(ExplainSensor(c, z))
     add(ents)
 
 
@@ -138,3 +137,58 @@ class HubSensor(HubEntity, SensorEntity):
     @property
     def native_value(self):
         return self.entity_description.value(self.coordinator)
+
+
+class ExplainSensor(ZoneEntity, SensorEntity):
+    """Was die Regelung gerade tut und warum – als Satz; Details und 12-h-Plan als Attribute."""
+
+    _platform = "sensor"
+    _attr_icon = "mdi:head-lightbulb-outline"
+    # Plan (48 Einträge) nicht in die Datenbank schreiben – ändert sich alle 15 min
+    _unrecorded_attributes = frozenset({"plan"})
+
+    def __init__(self, coordinator: HeatingCoordinator, zone: Zone) -> None:
+        super().__init__(coordinator, zone, "explain")
+
+    @property
+    def native_value(self) -> str | None:
+        return self.zone.explanation
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return self.zone.info
+
+
+class SupplySensor(HubEntity, SensorEntity):
+    """Vorlauf: gemessen (Rohrfühler bei fließendem Wasser) oder aus der (gelernten) Heizkurve."""
+
+    _platform = "sensor"
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: HeatingCoordinator) -> None:
+        super().__init__(coordinator, "supply")
+
+    @property
+    def native_value(self) -> float | None:
+        v = self.coordinator.estimated_supply()
+        return None if v is None else round(v, 1)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        c = self.coordinator
+        s = c.supply
+        now = time.time()
+        attrs: dict = {
+            "quelle": "gemessen" if s.measured(now) is not None else "Heizkurve",
+            "heizkurve": (f"{c.curve.supply(-10):.0f} °C bei −10 °C, {c.curve.supply(0):.0f} °C bei 0 °C, "
+                          f"{c.curve.supply(10):.0f} °C bei +10 °C"),
+            "heizkurve_gelernt": s.curve_params() is not None,
+            "messungen": s.n,
+            "kessel_liefert_waerme": not s.heat_missing(now),
+        }
+        nb = s.night_setback()
+        if nb:
+            attrs["nachtabsenkung"] = f"{nb[0]:02d}–{(nb[1] + 1) % 24:02d} Uhr, ca. {nb[2]:.0f} K".replace(".", ",")
+        return attrs

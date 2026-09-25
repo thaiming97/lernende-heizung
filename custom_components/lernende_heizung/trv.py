@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from homeassistant.components.climate import HVACMode
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -39,6 +40,7 @@ class TrvActuator:
         self.climate_id = climate_id
         self.entities: dict[str, str] = {}
         self.last_pct: int | None = None
+        self.last_write_ts: float | None = None
         self._pending: asyncio.Task | None = None
         self.resolved = False
 
@@ -72,6 +74,19 @@ class TrvActuator:
     def available(self) -> bool:
         st = self.hass.states.get(self.climate_id)
         return st is not None and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN)
+
+    def write_mismatch(self, now_ts: float, grace_s: float = 900.0) -> bool:
+        """TRVZB: meldet der Kopf eine Viertelstunde nach dem Befehl eine andere Öffnung zurück?
+        (Befehl nicht angekommen – z. B. Funkproblem oder Kopf hängt.)"""
+        if self.kind != "trvzb" or self.last_pct is None or self.last_write_ts is None:
+            return False
+        if now_ts - self.last_write_ts < grace_s:
+            return False
+        st = self.hass.states.get(self.entities["open"])
+        try:
+            return st is not None and abs(float(st.state) - self.last_pct) > 2
+        except ValueError:
+            return False
 
     def observed_valve(self) -> float | None:
         """Tatsächliche Ventilstellung (0..1), wenn ein anderer Regler (z. B. BT) den TRV steuert.
@@ -146,6 +161,7 @@ class TrvActuator:
                     self._delayed(seq[1]), name=f"lernende_heizung_bump_{self.climate_id}"
                 )
             self.last_pct = pct
+            self.last_write_ts = time.time()
         else:
             # generisch: an/aus über Solltemperatur
             st = self.hass.states.get(self.climate_id)

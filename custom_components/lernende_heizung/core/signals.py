@@ -175,7 +175,12 @@ class RoomSensorFilter:
 # ----------------------------------------------------------------------------- Vorlauf
 @dataclass
 class SupplyLearner:
-    """Heizkurve aus einem Rohrfühler am Heizkörper: lernt Tvl = a + b·Tout bei offenem Ventil."""
+    """Heizkurve aus einem Rohrfühler am Heizkörper: lernt Tvl = a + b·Tout bei offenem Ventil,
+    dazu einen Versatz je Tagesstunde (Nachtabsenkung des Kessels).
+
+    Der Fühler zeigt den Vorlauf nur, wenn Wasser fließt: Ventil ≥ 30 % seit 20 min und Rohr
+    deutlich wärmer als der Raum. Bleibt das Rohr trotz offenem Ventil kalt, liefert der Kessel
+    gerade keine Wärme (``no_heat``)."""
 
     a: float = 47.0
     b: float = -0.8
@@ -186,8 +191,52 @@ class SupplyLearner:
     _sy: float = 0.0
     _sxy: float = 0.0
     _w: float = 0.0
+    hour_off: list[float] = field(default_factory=lambda: [0.0] * 24)
+    hour_n: list[int] = field(default_factory=lambda: [0] * 24)
+    last_valid: float | None = None  # zuletzt gemessener Vorlauf (Rohr + Versatz)
+    last_valid_ts: float | None = None
+    no_heat: bool = False
+    no_heat_ts: float = 0.0
 
-    def update(self, ts: float, pipe: float | None, t_out: float | None, valve: float, pipe_offset: float = 2.0) -> None:
+    FLOW_MIN_K = 5.0  # Rohr so viel wärmer als der Raum → es fließt Heizwasser
+    COLD_K = 3.0  # darunter trotz offenem Ventil: Kessel liefert nichts
+    HOUR_MIN_N = 5
+
+    def measured(self, ts: float, max_age_s: float = 900.0) -> float | None:
+        """Gemessener Vorlauf, wenn er aktuell ist (sonst None → Heizkurve verwenden)."""
+        if self.last_valid is None or self.last_valid_ts is None or ts - self.last_valid_ts > max_age_s:
+            return None
+        return self.last_valid
+
+    def heat_missing(self, ts: float) -> bool:
+        """Kessel lieferte zuletzt (≤ 2 h) trotz offenem Ventil keine Wärme."""
+        return self.no_heat and ts - self.no_heat_ts < 7200
+
+    def curve_params(self) -> tuple[float, float, tuple[float, ...]] | None:
+        """(Vorlauf bei −10 °C, bei +15 °C, Stundenversatz) – None, solange zu wenig gelernt."""
+        if self.n < 30:
+            return None
+        offs = tuple(o if c >= self.HOUR_MIN_N else 0.0 for o, c in zip(self.hour_off, self.hour_n))
+        return self.supply(-10), self.supply(15), offs
+
+    def night_setback(self) -> tuple[int, int, float] | None:
+        """Erkannte Absenkung: (erste Stunde, letzte Stunde, mittlerer Versatz in K) oder None."""
+        low = [h for h in range(24) if self.hour_n[h] >= self.HOUR_MIN_N and self.hour_off[h] < -4.0]
+        if not low:
+            return None
+        # zusammenhängenden Block (über Mitternacht) finden
+        start = next((h for h in low if (h - 1) % 24 not in low), low[0])
+        hours = []
+        h = start
+        while h in low and len(hours) < 24:
+            hours.append(h)
+            h = (h + 1) % 24
+        return hours[0], hours[-1], sum(self.hour_off[x] for x in hours) / len(hours)
+
+    def update(
+        self, ts: float, pipe: float | None, t_out: float | None, valve: float, pipe_offset: float = 2.0,
+        t_room: float | None = None, hour: int | None = None,
+    ) -> None:
         if pipe is None or t_out is None:
             return
         if valve < 0.3:
@@ -198,7 +247,22 @@ class SupplyLearner:
             return
         if ts - self.open_since < 20 * 60:
             return
+        if t_room is not None:
+            if pipe - t_room < self.COLD_K and ts - self.open_since >= 30 * 60:
+                self.no_heat, self.no_heat_ts = True, ts
+                self.last_valid, self.last_valid_ts = pipe, ts  # tatsächlich kommt kaum Wärme an
+                return
+            if pipe - t_room < self.FLOW_MIN_K:
+                return
+        self.no_heat = False
         y = pipe + pipe_offset
+        self.last_valid, self.last_valid_ts = y, ts
+        if hour is not None:
+            h = hour % 24
+            c = self.hour_n[h]
+            a = max(0.05, 1.0 / (c + 1))
+            self.hour_off[h] += a * ((y - (self.a + self.b * t_out)) - self.hour_off[h])
+            self.hour_n[h] = c + 1
         lam = 0.999
         self._w = lam * self._w + 1
         self._sx = lam * self._sx + t_out
@@ -218,11 +282,16 @@ class SupplyLearner:
         return min(75.0, max(25.0, self.a + self.b * t_out))
 
     def export(self) -> dict:
-        return {k: getattr(self, k) for k in ("a", "b", "n", "_sxx", "_sx", "_sy", "_sxy", "_w")}
+        d = {k: getattr(self, k) for k in ("a", "b", "n", "_sxx", "_sx", "_sy", "_sxy", "_w")}
+        d["hour_off"], d["hour_n"] = list(self.hour_off), list(self.hour_n)
+        return d
 
     def restore(self, raw: dict) -> None:
         for k, v in raw.items():
-            if hasattr(self, k) and isinstance(v, (int, float)) and math.isfinite(v):
+            if k in ("hour_off", "hour_n"):
+                if isinstance(v, list) and len(v) == 24 and all(isinstance(x, (int, float)) and math.isfinite(x) for x in v):
+                    setattr(self, k, [float(x) if k == "hour_off" else int(x) for x in v])
+            elif hasattr(self, k) and isinstance(v, (int, float)) and math.isfinite(v):
                 setattr(self, k, type(getattr(self, k))(v))
 
 

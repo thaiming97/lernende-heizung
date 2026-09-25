@@ -21,6 +21,7 @@ from custom_components.lernende_heizung.core.controller import (
     Target,
     ZoneController,
 )
+from custom_components.lernende_heizung.core.explain import Situation, explain
 from custom_components.lernende_heizung.core.learning import ZoneLearner
 from custom_components.lernende_heizung.core.model import (
     HeatingCurve,
@@ -28,6 +29,7 @@ from custom_components.lernende_heizung.core.model import (
     ZoneParams,
     ZoneState,
     effective_valve,
+    radiator_factor,
     step,
     valve_from_effective,
 )
@@ -320,3 +322,90 @@ def test_version_consistent_and_documented():
     manifest = json.loads((root / "custom_components" / "lernende_heizung" / "manifest.json").read_text(encoding="utf8"))
     assert manifest["version"] == VERSION
     assert f"\n## {VERSION} " in (root / "CHANGELOG.md").read_text(encoding="utf8")
+
+
+# ----------------------------------------------------------------------------- Vorlauffühler
+def test_supply_learner_night_setback_and_cold_boiler():
+    sl = SupplyLearner()
+    rnd = random.Random(2)
+    ts = 0.0
+    for _ in range(14 * 24 * 6):  # 2 Wochen, alle 10 min, Ventil offen
+        hour = int(ts // 3600) % 24
+        tout = 3 + 6 * math.sin(ts / 86400 * 2 * math.pi) + rnd.uniform(-2, 2)
+        night = hour >= 22 or hour < 5
+        pipe = 50.0 - 0.9 * tout - 2.0 - (8.0 if night else 0.0)  # Kessel senkt nachts 8 K ab
+        sl.update(ts, pipe, tout, 0.8, t_room=21.0, hour=hour)
+        ts += 600
+    nb = sl.night_setback()
+    assert nb is not None and nb[0] == 22 and nb[1] == 4, nb
+    m10, p15, offs = sl.curve_params()
+    curve = HeatingCurve(tvl_at_m10=m10, tvl_at_p15=p15, hour_offset=offs)
+    assert curve.supply(0.0, 12) - curve.supply(0.0, 2) > 6  # Nachtabsenkung steckt in der Kurve
+    assert sl.measured(ts) is not None and not sl.heat_missing(ts)
+    # Kessel aus: Ventil offen, Rohr bleibt kalt → gemeldet, Vorlauf ≈ Raum
+    for _ in range(8):
+        sl.update(ts, 22.0, 5.0, 0.8, t_room=21.0, hour=12)
+        ts += 600
+    assert sl.heat_missing(ts) and sl.measured(ts) < 25
+    # Ventil zu → Fühler zeigt keinen Vorlauf, Messwert veraltet nach 15 min
+    for _ in range(3):
+        sl.update(ts, 30.0, 5.0, 0.0, t_room=21.0, hour=12)
+        ts += 600
+    assert sl.measured(ts) is None
+    raw = sl.export()
+    sl2 = SupplyLearner()
+    sl2.restore(raw)
+    assert sl2.night_setback() == nb
+
+
+def test_curve_change_keeps_learned_heating_effect():
+    prior = ZoneParams(h=(1.5, 1.5, 1.5))
+    L = ZoneLearner(prior)
+    old = HeatingCurve()
+    before = [h * radiator_factor(old.supply(a), 21.0) for h, a in zip(L.params().h, (-10, 0, 10))]
+    new = HeatingCurve(tvl_at_m10=45.0, tvl_at_p15=30.0)  # Kessel fährt kälter als angenommen
+    L.adopt_curve(new)
+    after = [h * radiator_factor(new.supply(a), 21.0) for h, a in zip(L.params().h, (-10, 0, 10))]
+    assert all(math.isclose(b, a, rel_tol=1e-6) for b, a in zip(before, after))
+    assert L.params().h[1] > 1.5  # gleiche Wirkung bei kälterem Vorlauf → größere Heizwirkung h
+    # Neustart: Schätzwerte und Startwerte passen weiter zur neuen Kurve
+    L2 = ZoneLearner(prior)
+    L2.restore(copy.deepcopy(L.export()))
+    assert L2.curve_ref == L.curve_ref
+    assert math.isclose(L2.prior.h[1], L.prior.h[1]) and math.isclose(L2.params().h[1], L.params().h[1])
+    L2.adopt_curve(new)  # keine erneute Umrechnung
+    assert math.isclose(L2.params().h[1], L.params().h[1])
+
+
+def test_plan_uses_supply_hour_offset():
+    p = ZoneParams(k_am=0.05, k_ma=0.02, k_n=0.0, k_o=0.003, h=(1.5, 1.5, 1.5))
+    x = Inputs(t_out=0.0)
+    tgt = lambda _ts: Target(22.0, True)  # noqa: E731
+    temps = []
+    for offs in ((), tuple(-20.0 for _ in range(24))):  # Kessel liefert (fast) nichts
+        c = ZoneController(p, curve=HeatingCurve(hour_offset=offs), hour_of=lambda ts: 3)
+        c.observe(0.0, 20.0, x, 0.0)
+        plan = c.make_plan(0.0, x, tgt, lambda _t: 0.0, lambda _t: NO_SUN)
+        temps.append(plan.t_pred[-1])
+    assert temps[0] > temps[1] + 0.5  # mit kaltem Vorlauf kommt der Raum nicht hoch
+
+
+# ----------------------------------------------------------------------------- Erklärung
+def test_explanations():
+    fmt = lambda ts: f"{int(ts // 3600) % 24:02d}:{int(ts % 3600 // 60):02d}"  # noqa: E731
+    s = Situation(reason="vorheizen", temp=20.4, setpoint=19.0, valve_pct=80, want_pct=80, fmt_time=fmt,
+                  next_change=(15.5 * 3600, 22.5, True))
+    assert explain(s) == "Heizt vor: 22,5 °C ab 15:30, jetzt 20,4 °C, Ventil 80 %."
+    s = Situation(reason="komfort", temp=22.4, setpoint=22.5, valve_pct=0, want_pct=0, fmt_time=fmt, sun_3h_k=0.8,
+                  temp_in_1h=22.6, disturbance=0.3)
+    t = explain(s)
+    assert "Sonne" in t and "+0,8 K" in t and "Zusatzwärme" in t and "In 1 h 22,6 °C" in t
+    s = Situation(reason="beobachten", temp=21.0, setpoint=21.0, valve_pct=0, want_pct=35, fmt_time=fmt)
+    assert "würde 35 %" in explain(s)
+    s = Situation(reason="sommer", temp=23.0, setpoint=21.0, valve_pct=0, want_pct=0, fmt_time=fmt, t_out_mean24=18.24)
+    assert "18,2 °C" in explain(s) and "Heizgrenze 16 °C" in explain(s)
+    s = Situation(reason="komfort", temp=21.0, setpoint=22.0, valve_pct=100, want_pct=100, fmt_time=fmt,
+                  heat_missing=True, learning_paused="Ventilstellung unbekannt")
+    assert "Kessel liefert" in explain(s) and "Lernen pausiert" in explain(s)
+    assert len(explain(Situation(reason="rueckfall", temp=21.0, setpoint=22.0, valve_pct=50, want_pct=50,
+                                 fmt_time=fmt, disturbance=-0.5, heat_missing=True, learning_paused="x" * 300))) <= 255

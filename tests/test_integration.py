@@ -18,7 +18,10 @@ from custom_components.lernende_heizung.const import (
     CONF_COMFORT,
     CONF_ECO_DELTA,
     CONF_RAD_KW,
+    CONF_OUTDOOR,
     CONF_SCHEDULE,
+    CONF_SUPPLY,
+    CONF_SUPPLY_ZONE,
     CONF_TEMP,
     CONF_TRVS,
     CONF_WINDOWS,
@@ -29,6 +32,7 @@ from custom_components.lernende_heizung.const import (
     SENSOR_STALE_S,
 )
 from custom_components.lernende_heizung.coordinator import _num
+from custom_components.lernende_heizung.diagnostics import async_get_config_entry_diagnostics
 
 ZONE = {
     CONF_ZONE_ID: "bad", CONF_ZONE_NAME: "Bad", CONF_TEMP: "sensor.bad_temp", CONF_TRVS: ["climate.bad"],
@@ -239,4 +243,57 @@ async def test_season_switch_closes_valves_and_pauses_learning(hass: HomeAssista
         await hass.async_block_till_done()
         assert not coord.heating_season
         assert coord._export()["season"] == "auto"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_explanation_problems_and_diagnostics(hass: HomeAssistant) -> None:
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    expl = hass.states.get("sensor.bad_erklaerung_lh")
+    assert expl is not None and expl.state.startswith("Nur beobachten")
+    assert len(expl.attributes["plan"]) == 48 and {"zeit", "soll", "prognose", "ventil"} <= set(expl.attributes["plan"][0])
+    assert expl.attributes["lernt"] is True
+    assert hass.states.get("binary_sensor.bad_problem_lh").state == "off"
+
+    # Thermostat weg → Problem, Lernen pausiert (Ventilstellung unbekannt)
+    hass.states.async_set("climate.bad", "unavailable")
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    prob = hass.states.get("binary_sensor.bad_problem_lh")
+    assert prob.state == "on" and "nicht erreichbar" in prob.attributes["probleme"][0]
+    assert hass.states.get("sensor.bad_erklaerung_lh").attributes["lernt"] is False
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["zonen"]["bad"]["probleme"] and "modell" in diag["zonen"]["bad"]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_supply_sensor_learns_in_observe_mode(hass: HomeAssistant, freezer) -> None:
+    """Rohrfühler zählt auch, wenn die Zone nur beobachtet (Ventil vom TRV selbst geöffnet)."""
+    async_mock_service(hass, "number", "set_value")
+    _trv(hass, "bad")
+    hass.states.async_set("climate.bad", "heat", {"hvac_action": "heating", "min_temp": 4, "max_temp": 35})
+    hass.states.async_set("number.bad_valve_opening_degree", "80")
+    hass.states.async_set("sensor.bad_temp", "20.0", {"unit_of_measurement": "°C", "device_class": "temperature"})
+    hass.states.async_set("binary_sensor.fenster_bad", "off")
+    hass.states.async_set("sensor.rohr", "45.0", {"unit_of_measurement": "°C", "device_class": "temperature"})
+    hass.states.async_set("sensor.aussen", "2.0", {"unit_of_measurement": "°C", "device_class": "temperature"})
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN,
+                            data={CONF_ZONES: [ZONE], CONF_SUPPLY: "sensor.rohr", CONF_SUPPLY_ZONE: "bad",
+                                  CONF_OUTDOOR: "sensor.aussen"})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    for _ in range(8):  # 40 min
+        freezer.tick(timedelta(minutes=5))
+        for eid, val in (("sensor.rohr", "45.0"), ("sensor.bad_temp", "20.0")):
+            hass.states.async_set(eid, val, {"unit_of_measurement": "°C", "device_class": "temperature"}, force_update=True)
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+    assert coord.supply.n > 0
+    sup = hass.states.get("sensor.vorlauf_lh")
+    assert sup.attributes["quelle"] == "gemessen" and float(sup.state) == 47.0  # Rohr + 2 K
+    assert "gemessen" in hass.states.get("sensor.bad_erklaerung_lh").attributes["vorlauf_quelle"]
     assert await hass.config_entries.async_unload(entry.entry_id)

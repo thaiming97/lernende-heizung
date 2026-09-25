@@ -64,6 +64,7 @@ from .const import (
     SEASON_SUMMER,
     SEASON_WINTER,
     SENSOR_STALE_S,
+    SUPPLY_STALE_S,
     STORE_SAVE_DELAY_S,
     STORE_VERSION,
     WINDOW_LEARN_PAUSE_S,
@@ -76,7 +77,16 @@ from .core.controller import (
     ZoneController,
 )
 from .core.learning import ZoneLearner
-from .core.model import HeatingCurve, Inputs, ZoneParams, effective_valve, heating_power_kw, steady_heat_demand
+from .core.explain import Situation, explain
+from .core.model import (
+    HeatingCurve,
+    Inputs,
+    ZoneParams,
+    effective_valve,
+    heating_power_kw,
+    steady_heat_demand,
+    valve_from_effective,
+)
 from .core.schedule import ScheduleError, WeekSchedule
 from .core.signals import OutdoorFusion, RoomSensorFilter, SunModel, SupplyLearner
 from .trv import TrvActuator
@@ -105,6 +115,14 @@ def _num(hass: HomeAssistant, entity_id: str | None, max_age_s: float | None = N
     except ValueError:
         return None
     return v if math.isfinite(v) else None
+
+
+def _local_hour(ts: float) -> int:
+    return dt_util.as_local(dt_util.utc_from_timestamp(ts)).hour
+
+
+def _hhmm(ts: float) -> str:
+    return dt_util.as_local(dt_util.utc_from_timestamp(ts)).strftime("%H:%M")
 
 
 def prior_from_config(z: dict) -> ZoneParams:
@@ -145,6 +163,12 @@ class Zone:
     saving_pct: float | None = None
     saving_ts: float = 0.0
     last_ext_temp: float | None = None
+    controlling: bool = False
+    valve_frac: float | None = None  # wirksame Stellung 0..1 (gestellt bzw. beobachtet), None = unbekannt
+    primary_missing: bool = False
+    info: dict = field(default_factory=dict)  # „was denkt die Regelung" (Sensor Erklärung)
+    explanation: str | None = None
+    problems: list[str] = field(default_factory=list)
 
     @property
     def zid(self) -> str:
@@ -182,6 +206,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.fusion = OutdoorFusion()
         self.sun = SunModel(hass.config.latitude, hass.config.longitude)
         self.supply = SupplyLearner()
+        self.curve = HeatingCurve()
+        self.t_supply: float | None = None
         self.t_out: float | None = None
         self.t_out_mean24: float | None = None
         self.sun_now: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -401,23 +427,27 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.presence == PRESENCE_VACATION and self.return_at and now_ts > self.return_at.timestamp() + 3600:
             self.presence = PRESENCE_HOME
 
-        # Raumtemperaturen (gefiltert)
+        # Raumtemperaturen (gefiltert), Fenster, Ventilstellung
         for z in self.zones.values():
             prim = _num(self.hass, z.cfg.get(CONF_TEMP), SENSOR_STALE_S)
             sec = _num(self.hass, z.cfg.get(CONF_TEMP2), SENSOR_STALE_S)
+            z.primary_missing = prim is None
             z.temp = z.filt.update(now_ts, prim, sec)
             z.window_open = any(
                 (st := self.hass.states.get(w)) is not None and st.state == STATE_ON for w in z.cfg.get(CONF_WINDOWS, [])
             )
+            z.controlling = self.master_on and z.active
+            z.valve_frac = self._valve_frac(z)
 
-        # Vorlauf (Rohrfühler am Heizkörper der gewählten Zone)
-        supply_t = _num(self.hass, opts.get(CONF_SUPPLY))
+        # Vorlauf: Rohrfühler am Heizkörper der gewählten Zone (zählt nur, wenn dort Wasser fließt)
+        supply_t = _num(self.hass, opts.get(CONF_SUPPLY), SUPPLY_STALE_S)
         sz = self.zones.get(opts.get(CONF_SUPPLY_ZONE) or "")
-        if supply_t is not None and sz is not None:
-            self.supply.update(now_ts, supply_t, self.t_out, sz.valve_pct / 100)
-        curve = HeatingCurve()
-        if self.supply.n >= 30:
-            curve = HeatingCurve(tvl_at_m10=self.supply.supply(-10), tvl_at_p15=self.supply.supply(15))
+        if supply_t is not None and sz is not None and sz.valve_frac is not None:
+            self.supply.update(now_ts, supply_t, self.t_out, sz.valve_frac, t_room=sz.temp, hour=local.hour)
+        self._update_curve()
+        t_out_now = self.t_out if self.t_out is not None else 5.0
+        measured = self.supply.measured(now_ts)
+        self.t_supply = measured if measured is not None else self.curve.supply(t_out_now, local.hour)
 
         if self.season == SEASON_SUMMER:
             summer = True
@@ -436,17 +466,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for z in self.zones.values():
             others = [v for k, v in temps.items() if k != z.zid]
             t_nbr = sum(others) / len(others) if others else None
-            x = Inputs(t_out=self.t_out if self.t_out is not None else 5.0, t_nbr=t_nbr, sun=self.sun_now)
-            z.controller.curve = curve
-            z.learner.curve = curve
-            controlling = self.master_on and z.active
-            if controlling:
-                valve_frac: float | None = z.valve_pct / 100
-            else:
-                # Beobachtungsmodus: Stellung ablesen, die der TRV (bzw. BT) gerade fährt
-                obs = [v for t in z.trvs if (v := t.observed_valve()) is not None]
-                valve_frac = sum(obs) / len(obs) if obs else None
-                z.valve_obs = valve_frac
+            x = Inputs(t_out=t_out_now, t_nbr=t_nbr, sun=self.sun_now, t_supply=self.t_supply)
+            controlling = z.controlling
+            valve_frac = z.valve_frac
             if valve_frac is not None and valve_frac > 0:
                 z.last_open_ts = now_ts
             # Lernen (auch im Beobachtungsmodus, sofern die Ventilstellung bekannt ist). Im Sommer
@@ -492,9 +514,127 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             z.decision = dec
             await self._actuate(z, dec, now_ts, controlling)
             await self._update_saving(z, now_ts, x)
+            self._describe(z, now_ts, summer)
 
         self.schedule_save()
         return {"ts": now_ts}
+
+    def _valve_frac(self, z: Zone) -> float | None:
+        """Ventilstellung 0..1: gestellt (aktiv) bzw. am TRV abgelesen (beobachten); None = unbekannt."""
+        if z.trvs and not any(t.available() for t in z.trvs):
+            return None  # kein Thermostat erreichbar → wir wissen nicht, was das Ventil macht
+        if z.controlling:
+            return z.valve_pct / 100
+        obs = [v for t in z.trvs if (v := t.observed_valve()) is not None]
+        z.valve_obs = sum(obs) / len(obs) if obs else None
+        return z.valve_obs
+
+    def _update_curve(self) -> None:
+        """Heizkurve aus dem Vorlauffühler übernehmen (sobald genug gelernt); die Lerner rechnen
+        ihre Heizwirkung dabei um, damit das bisher Gelernte gültig bleibt."""
+        cp = self.supply.curve_params()
+        curve = HeatingCurve() if cp is None else HeatingCurve(tvl_at_m10=cp[0], tvl_at_p15=cp[1], hour_offset=cp[2])
+        for z in self.zones.values():
+            before = z.learner.curve_ref
+            z.learner.adopt_curve(curve)
+            if z.learner.curve_ref != before:
+                z.controller.params = z.learner.params()
+            z.controller.curve = curve
+            if z.controller.hour_of is None:
+                z.controller.hour_of = _local_hour
+        self.curve = curve
+
+    def next_change(self, z: Zone, now_ts: float) -> tuple[float, float, bool] | None:
+        """Nächster Sollwertwechsel in den kommenden 24 h: (Zeit, Sollwert, Komfort?)."""
+        cur = self.target_at(z, now_ts)
+        start = now_ts - now_ts % 900 + 900
+        for k in range(96):
+            ts = start + k * 900
+            tg = self.target_at(z, ts)
+            if tg.setpoint != cur.setpoint or tg.comfort != cur.comfort:
+                return ts, tg.setpoint, tg.comfort
+        return None
+
+    def _sun_gain(self, z: Zone, now_ts: float, hours: float = 3.0) -> float:
+        """Erwärmung durch Sonne in den nächsten Stunden laut Modell (K, ohne Speicherdämpfung)."""
+        f = self.sun_at(now_ts)
+        g = z.controller.params.g_sun
+        return sum(sum(gi * si for gi, si in zip(g, f(now_ts + k * 900))) * 0.25 for k in range(int(hours * 4)))
+
+    def _describe(self, z: Zone, now_ts: float, summer: bool) -> None:
+        """Erklärung, Kennzahlen und Probleme einer Zone für die Entities aufbereiten."""
+        d = z.decision
+        tg = self.target_at(z, now_ts)
+        plan = d.plan if d else None
+        nxt = self.next_change(z, now_ts)
+        t_at_change = None
+        if plan is not None and nxt is not None:
+            k = int(round((nxt[0] - now_ts) / 900)) - 1
+            if 0 <= k < len(plan.t_pred):
+                t_at_change = float(plan.t_pred[k])
+        preheat_ts = now_ts + plan.preheat_start_h * 3600 if plan is not None and plan.preheat_start_h is not None else None
+        valve_now = int(round(100 * (z.valve_frac or 0.0)))
+        want = int(round(100 * d.valve)) if d else 0
+        paused = None
+        if not summer:
+            if z.valve_frac is None:
+                paused = "Ventilstellung unbekannt (Thermostat nicht erreichbar)"
+            elif z.temp is None:
+                paused = "kein Raumwert"
+            elif not z.window_open and now_ts < z.learner.blocked_until:
+                paused = "Fenster war gerade offen"
+        rmse = z.learner.rmse()
+        sun3 = self._sun_gain(z, now_ts) if not summer else 0.0
+        heat_missing = self.supply.heat_missing(now_ts) and not summer
+        sit = Situation(
+            reason=d.reason if d else "aus", temp=z.temp, setpoint=tg.setpoint, valve_pct=valve_now, want_pct=want,
+            fmt_time=_hhmm, next_change=nxt, temp_at_change=t_at_change,
+            temp_in_1h=float(plan.t_pred[3]) if plan is not None and len(plan.t_pred) > 3 else None,
+            preheat_ts=preheat_ts, sun_3h_k=sun3, disturbance=z.controller.d, model_error=rmse, season=self.season,
+            t_out_mean24=self.t_out_mean24,
+            heating_limit=float(self.opts.get(CONF_HEATING_LIMIT, DEFAULT_HEATING_LIMIT)),
+            heat_missing=heat_missing, master_on=self.master_on, hvac_off=z.hvac_off,
+            learning_paused=paused,
+        )
+        z.explanation = explain(sit)
+        p = z.controller.params
+        info: dict[str, Any] = {
+            "grund": sit.reason, "soll": tg.setpoint, "ist": None if z.temp is None else round(z.temp, 2),
+            "ventil": valve_now, "ventil_geplant": want,
+            "naechster_wechsel": f"{_hhmm(nxt[0])} → {nxt[1]:.1f} °C".replace(".", ",") if nxt else None,
+            "vorheizstart": _hhmm(preheat_ts) if preheat_ts else None,
+            "sonne_3h_k": round(sun3, 2),
+            "zusatzwaerme_k_h": round(z.controller.d, 3), "grundwaerme_k_h": round(p.g0, 3),
+            "modellfehler_k_h": round(rmse, 3), "lernfortschritt": round(100 * z.learner.progress()),
+            "lernt": not summer and paused is None and not z.window_open,
+            "lernpause": "Sommer" if summer else ("Fenster offen" if z.window_open else paused),
+            "heizperiode": not summer,
+            "vorlauf": None if self.t_supply is None else round(self.t_supply, 1),
+            "vorlauf_quelle": "gemessen" if self.supply.measured(now_ts) is not None else "Heizkurve",
+        }
+        if plan is not None:
+            info["plan"] = [
+                {"zeit": _hhmm(now_ts + float(h) * 3600), "soll": self.target_at(z, now_ts + float(h) * 3600).setpoint,
+                 "prognose": round(float(tp), 2), "ventil": int(round(100 * valve_from_effective(float(u), p.valve_exp)))}
+                for h, tp, u in zip(plan.times_h, plan.t_pred, plan.u)
+            ]
+        z.info = info
+
+        probs: list[str] = []
+        if z.temp is None:
+            probs.append("Kein Raumwert – Sensor meldet sich nicht")
+        elif z.primary_missing and z.cfg.get(CONF_TEMP2):
+            probs.append("Hauptsensor meldet sich nicht – nutze den Zweitsensor")
+        for t in z.trvs:
+            if not t.available():
+                probs.append(f"Thermostat {t.climate_id} nicht erreichbar")
+            elif z.controlling and t.write_mismatch(now_ts):
+                probs.append(f"Thermostat {t.climate_id} übernimmt die Ventilstellung nicht")
+        if d and d.reason == "rueckfall":
+            probs.append("Sicherheitsbetrieb – Modell passt gerade nicht")
+        if heat_missing:
+            probs.append("Kessel liefert keine Wärme (Vorlauf kalt trotz offenem Ventil)")
+        z.problems = probs
 
     @staticmethod
     def _exercise_due(z: Zone, now_ts: float, local: datetime) -> bool:
@@ -561,8 +701,5 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return 1000 * steady_heat_demand(z.controller.params, tgt.setpoint, self.t_out) * z.controller.params.c_eff_kwh_per_k
 
     def estimated_supply(self) -> float | None:
-        if self.t_out is None:
-            return None
-        if self.supply.n >= 30:
-            return self.supply.supply(self.t_out)
-        return HeatingCurve().supply(self.t_out)
+        """Vorlauf jetzt: gemessen, wenn der Fühler gerade gültig ist, sonst aus der Heizkurve."""
+        return self.t_supply

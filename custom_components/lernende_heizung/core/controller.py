@@ -112,6 +112,7 @@ class ZoneController:
     u_prev: np.ndarray | None = None  # letzter Plan (je 15-min-Schritt) für den Warmstart
     u_prev_ts: float | None = None
     plan: Plan | None = None
+    hour_of: Callable[[float], int] | None = None  # Zeitstempel → lokale Stunde (für die Heizkurve)
 
     # ------------------------------------------------------------------ Zustand
     def observe(self, ts: float, t_meas: float, x: Inputs, u_applied: float, freeze_d: bool = False) -> None:
@@ -185,10 +186,14 @@ class ZoneController:
         t_out = np.array([t_out_at(ts + k * dt * 3600.0) for k in range(n)])
         sun = np.array([sun_at(ts + k * dt * 3600.0) for k in range(n)]) @ np.asarray(p.g_sun)
         tn = s.t if x_now.t_nbr is None else x_now.t_nbr
-        # Heizwirkung je Schritt bei u=1 (φ bei aktueller Raumtemperatur eingefroren)
+        # Heizwirkung je Schritt bei u=1 (φ bei aktueller Raumtemperatur eingefroren). Vorlauf aus der
+        # Heizkurve je Stunde (Nachtabsenkung); eine gemessene Abweichung jetzt klingt in ~2 h ab.
+        hour_of = self.hour_of or _utc_hour
+        corr = 0.0 if x_now.t_supply is None else x_now.t_supply - self.curve.supply(t_out[0], hour_of(ts))
+        c_fade = math.exp(-dt / 2.0)
         b = np.empty(n)
         for k in range(n):
-            tsup = x_now.t_supply if x_now.t_supply is not None else self.curve.supply(t_out[k])
+            tsup = self.curve.supply(t_out[k], hour_of(ts + k * dt * 3600.0)) + corr * c_fade**k
             phi = radiator_factor(tsup, s.t)
             w = anchor_weights(t_out[k])
             b[k] = phi * sum(wi * hi for wi, hi in zip(w, p.h))
@@ -373,6 +378,10 @@ class ZoneController:
                     setattr(self, k, float(v))
         except (TypeError, ValueError, KeyError):
             self.state = None
+
+
+def _utc_hour(ts: float) -> int:
+    return int(ts // 3600) % 24
 
 
 def valve_percent(u_eff: float, params: ZoneParams) -> int:
