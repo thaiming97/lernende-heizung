@@ -265,6 +265,38 @@ async def test_temperature_change_works_with_preset_and_presence(hass: HomeAssis
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
+async def test_vacation_with_and_without_return(hass: HomeAssistant, freezer) -> None:
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    cid = _eid(hass, entry, "climate", "bad_climate")
+    presence = _eid(hass, entry, "select", "presence")
+    ret_eid = _eid(hass, entry, "datetime", "return_at")
+
+    async def choose(option: str) -> None:
+        await hass.services.async_call("select", "select_option", {"entity_id": presence, "option": option}, blocking=True)
+        await hass.async_block_till_done()
+
+    # alte Rückkehrzeit vom letzten Urlaub steht noch drin → darf nicht sofort auf „Zuhause“ springen
+    coord.return_at = dt_util.utcnow() - timedelta(days=10)
+    await choose("urlaub")
+    assert coord.presence == "urlaub" and coord.return_at is None
+    assert hass.states.get(cid).attributes["temperature"] == 17.0  # Urlaub ohne Rückkehr: abgesenkt
+    # Rückkehr in 2 Tagen eintragen: bis dahin abgesenkt, der Plan sieht den Komfort danach
+    back = dt_util.utcnow() + timedelta(days=2)
+    await hass.services.async_call("datetime", "set_value", {"entity_id": ret_eid, "datetime": back}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).attributes["temperature"] == 17.0
+    assert coord.target_at(coord.zones["bad"], back.timestamp() + 60).setpoint == 23.5
+    # eine Stunde nach der Rückkehr automatisch wieder „Zuhause“
+    freezer.move_to(back + timedelta(hours=1, minutes=5))
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.presence == "zuhause"
+    assert hass.states.get(cid).attributes["temperature"] == 23.5
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_heating_limit_has_hysteresis(hass: HomeAssistant) -> None:
     async_mock_service(hass, "number", "set_value")
     entry = await _setup(hass)

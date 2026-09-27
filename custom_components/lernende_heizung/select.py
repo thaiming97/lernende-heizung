@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import time
+
 from homeassistant.components.select import SelectEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HeatingConfigEntry
-from .const import PRESENCE_OPTIONS, SEASON_OPTIONS
+from .const import PRESENCE_OPTIONS, PRESENCE_VACATION, SEASON_OPTIONS
 from .coordinator import HeatingCoordinator
 from .entity import HubEntity
 
@@ -30,6 +32,10 @@ class PresenceSelect(HubEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         self.coordinator.presence = option
+        ret = self.coordinator.return_at
+        if option == PRESENCE_VACATION and ret is not None and ret.timestamp() <= time.time():
+            # Rückkehrzeit vom letzten Urlaub → sonst ginge es sofort wieder auf „Zuhause“
+            self.coordinator.return_at = None
         for z in self.coordinator.zones.values():
             z.override = None  # von Hand verstellte Temperaturen gelten nur bis zum Anwesenheitswechsel
             z.controller.last_plan_ts = None

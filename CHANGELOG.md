@@ -4,6 +4,12 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.5.4 – 2026-09-27
+
+- **Urlaub** ohne eingetragene Rückkehrzeit senkt jetzt ab (bisher wurde normal weitergeheizt).
+- Steht noch die Rückkehrzeit vom letzten Urlaub drin, springt „Urlaub“ nicht mehr sofort auf
+  „Zuhause“ zurück – die alte Zeit wird gelöscht.
+
 ## 0.5.3 – 2026-09-25
 
 - Sensor „Vorlauf (geschätzt)“ heißt jetzt **„Vorlauf“**: Er zeigt den gemessenen Vorlauf, sobald

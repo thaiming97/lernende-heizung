@@ -347,7 +347,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return Target(z.override, True)
         if self.presence == PRESENCE_AWAY:
             return Target(z.away, False)
-        if self.presence == PRESENCE_VACATION and self.return_at and ts < self.return_at.timestamp():
+        # Urlaub: Abwesenheitstemperatur bis zur Rückkehr (ohne Rückkehrzeit unbegrenzt); danach
+        # gilt wieder der Zeitplan – der Regler sieht das im 12-h-Plan und heizt rechtzeitig vor
+        if self.presence == PRESENCE_VACATION and (self.return_at is None or ts < self.return_at.timestamp()):
             return Target(z.away, False)
         if z.manual is not None:
             return Target(z.manual, True)
