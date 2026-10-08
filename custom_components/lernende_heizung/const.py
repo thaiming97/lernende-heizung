@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.5.6"
+VERSION: Final = "0.5.7"
 
 PLATFORMS: Final = ["binary_sensor", "button", "climate", "datetime", "select", "sensor", "switch"]
 

@@ -4,6 +4,17 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.5.7 – 2026-10-08
+
+- **Lernen läuft nicht mehr weg.** Keine gelernte Kennzahl darf negativ werden. Bisher wurde ein Wert, der
+  unter 0 wollte, einfach auf 0 gesetzt – der Lerner glich das dann über eine andere, zusammenhängende
+  Kennzahl aus, die immer weiter weglief. In der simulierten Saison landete so die Mitheizung durch die
+  Nachbarräume im Schlafzimmer am Anschlag (40× zu hoch), der Vorhersagefehler verdreifachte sich bis an
+  die Grenze, ab der die Regelung in den einfachen Notbetrieb wechselt. Jetzt werden zusammenhängende
+  Werte gemeinsam nachgeführt: Der Vorhersagefehler bleibt in allen Räumen so klein, wie es das
+  Messrauschen zulässt, und die gelernten Werte liegen näher an der Wirklichkeit (Bad: Heizwirkung 2,1–2,5
+  statt 4,5, wahr 2,2). Geregelt wird in der Simulation gleich gut, mit etwas weniger Ventilbefehlen.
+
 ## 0.5.6 – 2026-10-08
 
 Fehlerkorrekturen aus einer gründlichen Gesamtprüfung:

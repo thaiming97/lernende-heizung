@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 import math
 
+import numpy as np
+
 from .model import (
     HeatingCurve,
     Inputs,
@@ -73,7 +75,6 @@ class Rls:
         th = [self.theta[i] + k[i] * e for i in range(n)]
         if self.prior:
             th = [t + self.leak * (p0 - t) for t, p0 in zip(th, self.prior)]
-        self.theta = [min(self.upper[i], max(0.0, th[i])) for i in range(n)]
         lam = self.lam
         self.P = [[(self.P[i][j] - k[i] * Px[j]) / lam for j in range(n)] for i in range(n)]
         # Kovarianz auf die Startunsicherheit begrenzen (kein Wind-up bei fehlender Anregung)
@@ -84,7 +85,47 @@ class Rls:
                 for j in range(n):
                     self.P[i][j] *= f
                     self.P[j][i] *= f
+        self.theta = _project(th, self.P, self.upper)
         return e
+
+
+def _project(th: list[float], P: list[list[float]], upper: list[float]) -> list[float]:
+    """Schätzwerte auf 0 … Obergrenze bringen – in der Metrik der Kovarianz, nicht Wert für Wert.
+
+    Wert für Wert abgeschnitten, glich das RLS die abgeschnittene Größe über korrelierte andere aus; die liefen
+    dann bis an ihre Grenze weg (Simulation Schlafzimmer: Nachbar-Kopplung am Anschlag, Vorhersagefehler 0,17 →
+    0,6 K/h). Hier: argmin (θ−θu)ᵀ P⁻¹ (θ−θu) unter den Grenzen (aktive Menge, 10 Größen)."""
+    tu = np.asarray(th, dtype=float)
+    lo, up = np.zeros_like(tu), np.asarray(upper, dtype=float)
+    t = np.clip(tu, lo, up)
+    if np.array_equal(t, tu):
+        return [float(v) for v in tu]
+    try:
+        Pm = np.asarray(P, dtype=float)
+        W = np.linalg.inv(0.5 * (Pm + Pm.T))
+    except np.linalg.LinAlgError:
+        return [float(v) for v in t]
+    fixed = t != tu
+    for _ in range(30):
+        free = ~fixed
+        if free.any():
+            rhs = W[np.ix_(free, free)] @ tu[free] - W[np.ix_(free, fixed)] @ (t[fixed] - tu[fixed])
+            try:
+                t = t.copy()
+                t[free] = np.linalg.solve(W[np.ix_(free, free)], rhs)
+            except np.linalg.LinAlgError:
+                break
+        out = (t < lo - 1e-12) | (t > up + 1e-12)
+        if out.any():
+            t = np.clip(t, lo, up)
+            fixed |= out
+            continue
+        g = W @ (t - tu)  # an der Untergrenze muss g ≥ 0 sein, an der Obergrenze g ≤ 0 – sonst wieder freigeben
+        release = fixed & (((t <= lo + 1e-12) & (g < -1e-12)) | ((t >= up - 1e-12) & (g > 1e-12)))
+        if not release.any():
+            break
+        fixed &= ~release
+    return [float(v) for v in np.clip(t, lo, up)]
 
 
 @dataclass

@@ -237,6 +237,30 @@ def test_learner_recovers_parameters():
     assert 0.04 < p.g0 < 0.2, p.g0  # Grundwärme erkannt
 
 
+def test_rls_bounds_do_not_drive_other_parameters_away():
+    """Simulierte Saison, Schlafzimmer (Regressoren und Messungen eines Modell-Kandidaten, 8000 Viertelstunden):
+    Wurde ein Wert an seiner Grenze (≥ 0) einfach abgeschnitten, glich der Lerner das über korrelierte Größen
+    aus – die Nachbar-Kopplung lief an den Anschlag, der Vorhersagefehler stieg von 0,17 auf über 0,5 K/h.
+    Richtig: begrenzen in der Metrik der Kovarianz (zusammenhängende Größen werden gemeinsam nachgeführt)."""
+    from pathlib import Path
+
+    import numpy as np
+
+    from custom_components.lernende_heizung.core.learning import Rls
+
+    d = np.load(Path(__file__).parent / "data" / "rls_schlafen.npz")
+    r = Rls.from_prior([float(v) for v in d["prior"]])
+    score, worst = 0.0, 0.0
+    for k, (x, y) in enumerate(zip(d["X"].tolist(), d["Y"].tolist())):
+        e = r.update(x, y, 0.03)
+        score = 0.997 * score + 0.003 * e * e if k else e * e
+        if k > 1000:
+            worst = max(worst, score)
+    assert math.sqrt(worst) < 0.22, math.sqrt(worst)  # Rauschboden ≈ 0,17 K/h
+    assert r.theta[1] < 0.05  # Nachbar-Kopplung bleibt plausibel (wahr 0,007; vorher 0,3 = Anschlag)
+    assert all(0.0 <= t <= u for t, u in zip(r.theta, r.upper))
+
+
 def test_learner_tracks_room_while_paused():
     """Während einer Lernpause (z. B. Fenster offen) laufen Speichermasse und Heizkörper mit der
     gemessenen Raumtemperatur weiter – vorher mit dem letzten Wert vor der Pause."""
