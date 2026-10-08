@@ -4,6 +4,29 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.5.5 – 2026-10-08
+
+Erfahrungen aus dem ersten Heiztag:
+
+- **Kurz rausgehen schließt kein Ventil mehr**: Fenster und Türen zählen erst, wenn sie länger als
+  1 Minute offen stehen. Bis dahin läuft alles normal weiter (auch das Lernen).
+- **Nach dem Lüften 15 Minuten warten**: Ist das Fenster wieder zu, bleibt das Ventil noch
+  15 Minuten geschlossen – die Luft wärmt sich zuerst aus Wänden und Möbeln wieder auf, sofort
+  heizen würde überheizen. Danach regelt es sofort weiter. Die Erklärung zeigt, bis wann gewartet wird.
+- **Neuere Zigbee2MQTT-Versionen**: Die Fühlerwahl am Thermostat heißt dort
+  `local_temperature`/`remote_temperature` statt `internal`/`external`. Bisher wurde sie deshalb nicht
+  umgestellt – vor allem beim Ausschalten der Regelung regelte der Kopf danach auf einen eingefrorenen
+  Wert. Beide Namensvarianten funktionieren jetzt.
+- Die Raumtemperatur geht mindestens alle 30 Minuten an die Thermostate, auch wenn sie sich nicht
+  ändert (sonst hält der Kopf den externen Fühler womöglich für ausgefallen).
+- **Vorlauffühler**: „Kessel liefert keine Wärme“ erst, wenn der Fühler schon einmal echten Vorlauf
+  gemessen hat – liegt er noch nicht am Rohr, steht dort ein Hinweis statt eines Fehlalarms.
+  Bleibt das Rohr bei offenem Ventil kalt, pausiert das Lernen (sonst hielte das Modell die
+  Heizkörper für schwächer, als sie sind).
+- „Lernen pausiert“ nennt jetzt den echten Grund (vorher stand nach dem Umschalten auf Winter
+  fälschlich „Fenster war gerade offen“), und die Erklärung zeigt die gerade gestellte
+  Ventilöffnung statt der vom letzten Takt.
+
 ## 0.5.4 – 2026-09-27
 
 - **Urlaub** ohne eingetragene Rückkehrzeit senkt jetzt ab (bisher wurde normal weitergeheizt).

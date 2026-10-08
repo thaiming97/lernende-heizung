@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.5.4"
+VERSION: Final = "0.5.5"
 
 PLATFORMS: Final = ["binary_sensor", "button", "climate", "datetime", "select", "sensor", "switch"]
 
@@ -46,6 +46,9 @@ CYCLE_S: Final = 300
 REPLAN_S: Final = 900
 WINDOW_LEARN_PAUSE_S: Final = 1800
 WINDOW_SETTLE_S: Final = 3600  # so lange nach dem Lüften erholt sich die Raumluft (kein Spitzenfilter)
+WINDOW_DELAY_S: Final = 60  # erst so lange offen zählt ein Fenster/eine Tür (kurz rausgehen ändert nichts)
+WINDOW_RESUME_S: Final = 900  # nach dem Schließen so lange zu lassen – die Luft wärmt sich selbst wieder auf
+EXT_TEMP_REFRESH_S: Final = 1800  # Raumtemperatur spätestens so oft an die Köpfe schicken, auch wenn gleich
 SENSOR_STALE_S: Final = 3 * 3600  # Raumsensor ohne Meldung → als ausgefallen behandeln
 SUPPLY_STALE_S: Final = 2 * 3600  # Vorlauffühler ohne Meldung → Wert nicht mehr verwenden
 HEATING_LIMIT_HYST: Final = 0.5  # K um die Heizgrenze, damit die Automatik nicht hin- und herschaltet

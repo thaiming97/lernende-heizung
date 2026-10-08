@@ -144,6 +144,18 @@ def test_controller_safety_layers():
     assert d.reason == REASON_NO_SENSOR and 0 < d.valve < 1
 
 
+def test_controller_replans_right_after_window():
+    """Nach dem Fenster (die Wartezeit regelt der Coordinator) sofort neu planen – nicht mit der
+    Öffnung 0 vom Fenster bis zur nächsten Viertelstunde weiterfahren."""
+    ctrl = ZoneController(ZoneParams())
+    x = Inputs(t_out=0.0)
+    tgt = lambda _ts: Target(22.0, True)  # noqa: E731
+    ctrl.observe(0.0, 19.0, x, 0.0)
+    assert ctrl.decide(0.0, 19.0, x, tgt, lambda t: 0.0, lambda t: NO_SUN).u_eff > 0.3
+    assert ctrl.decide(60.0, 19.0, x, tgt, lambda t: 0.0, lambda t: NO_SUN, window_open=True).u_eff == 0.0
+    assert ctrl.decide(120.0, 19.0, x, tgt, lambda t: 0.0, lambda t: NO_SUN).u_eff > 0.3
+
+
 def test_controller_export_restore():
     c = ZoneController(ZoneParams())
     c.observe(0.0, 20.0, Inputs(t_out=0.0), 0.0)
@@ -406,6 +418,37 @@ def test_supply_learner_small_openings():
     assert sl.heat_missing(ts)
 
 
+def test_supply_learner_needs_proof_before_cold_boiler():
+    """Fühler hat noch nie Vorlauf gezeigt (z. B. liegt noch im Raum statt am Rohr): kein Alarm
+    „Kessel kalt“ und kein Vorlauf ≈ Raumtemperatur fürs Modell – nur „Rohr kalt, unklar“."""
+    sl = SupplyLearner()
+    ts = 0.0
+    for _ in range(10):  # 50 min weit offen, Fühler zeigt Raumtemperatur
+        sl.update(ts, 21.5, 5.0, 0.6, t_room=21.0, hour=12)
+        ts += 300
+    assert not sl.heat_missing(ts) and sl.measured(ts) is None
+    assert sl.pipe_cold(ts)
+
+
+def test_supply_learner_flags_cold_pipe_at_small_opening():
+    """Rohr kalt bei kleiner Öffnung: kein Kessel-Alarm (zu wenig Durchfluss), aber unklar, ob Wärme
+    ankommt → der Coordinator pausiert damit das Lernen. Fließt wieder warmes Wasser, ist es vorbei."""
+    sl = SupplyLearner()
+    ts = 0.0
+    for _ in range(6):
+        sl.update(ts, 43.0, 2.0, 0.10, t_room=21.0, hour=12)
+        ts += 300
+    assert not sl.pipe_cold(ts)
+    for _ in range(4):
+        sl.update(ts, 22.0, 2.0, 0.10, t_room=21.0, hour=12)
+        ts += 300
+    assert sl.pipe_cold(ts) and not sl.heat_missing(ts)
+    sl.update(ts, 43.0, 2.0, 0.10, t_room=21.0, hour=12)
+    assert not sl.pipe_cold(ts)
+    sl.update(ts + 300, 22.0, 2.0, 0.0, t_room=21.0, hour=12)  # Ventil zu → egal
+    assert not sl.pipe_cold(ts + 300)
+
+
 def test_curve_change_keeps_learned_heating_effect():
     prior = ZoneParams(h=(1.5, 1.5, 1.5))
     L = ZoneLearner(prior)
@@ -455,5 +498,8 @@ def test_explanations():
     s = Situation(reason="komfort", temp=21.0, setpoint=22.0, valve_pct=100, want_pct=100, fmt_time=fmt,
                   heat_missing=True, learning_paused="Ventilstellung unbekannt")
     assert "Kessel liefert" in explain(s) and "Lernen pausiert" in explain(s)
+    s = Situation(reason="fenster", temp=20.0, setpoint=22.0, valve_pct=0, want_pct=0, fmt_time=fmt,
+                  window_wait_until=17.25 * 3600)
+    assert explain(s).startswith("Nach dem Lüften: Ventil bleibt bis 17:15 zu")
     assert len(explain(Situation(reason="rueckfall", temp=21.0, setpoint=22.0, valve_pct=50, want_pct=50,
                                  fmt_time=fmt, disturbance=-0.5, heat_missing=True, learning_paused="x" * 300))) <= 255

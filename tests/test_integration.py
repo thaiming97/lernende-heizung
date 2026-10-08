@@ -108,7 +108,7 @@ async def test_options_add_and_remove_zone(hass: HomeAssistant) -> None:
 
 
 # ----------------------------------------------------------------------------- Laufzeit
-async def test_observe_then_control_window_and_master(hass: HomeAssistant) -> None:
+async def test_observe_then_control_window_and_master(hass: HomeAssistant, freezer) -> None:
     calls = async_mock_service(hass, "number", "set_value")
     with patch.object(trv_mod, "BUMP_DELAY_S", 0):
         entry = await _setup(hass)
@@ -133,9 +133,10 @@ async def test_observe_then_control_window_and_master(hass: HomeAssistant) -> No
         assert any(c.data["option"] == "external" for c in sel_calls)
         assert coord.zones["bad"].controlled
 
-        # Fenster auf → sofort zu
+        # Fenster auf → nach 1 min zu
         calls.clear()
         hass.states.async_set("binary_sensor.fenster_bad", "on")
+        freezer.tick(timedelta(seconds=61))
         await coord.async_refresh()
         await hass.async_block_till_done()
         last = {c.data["entity_id"]: c.data["value"] for c in calls}
@@ -152,6 +153,174 @@ async def test_observe_then_control_window_and_master(hass: HomeAssistant) -> No
         assert temp_calls and not coord.zones["bad"].controlled
         assert sel_calls[-1].data["option"] == "internal"
 
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def _activate(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    await hass.services.async_call("switch", "turn_on", {"entity_id": _eid(hass, entry, "switch", "bad_active")}, blocking=True)
+    await hass.async_block_till_done()
+
+
+async def _tick(hass: HomeAssistant, freezer, coord, seconds: float) -> None:
+    freezer.tick(timedelta(seconds=seconds))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    hass.states.async_set("sensor.bad_temp", "20.0", {"unit_of_measurement": "°C", "device_class": "temperature"},
+                          force_update=True)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+
+async def test_window_counts_only_after_one_minute(hass: HomeAssistant, freezer) -> None:
+    """Kurz rausgehen (Tür < 1 min offen): Ventil bleibt, Lernen läuft weiter. Erst ab 1 min gilt sie als offen."""
+    calls = async_mock_service(hass, "number", "set_value")
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry = await _setup(hass)
+        coord = entry.runtime_data
+        async_mock_service(hass, "climate", "set_hvac_mode")
+        async_mock_service(hass, "select", "select_option")
+        await _activate(hass, entry)
+        z = coord.zones["bad"]
+        opened = z.valve_pct
+        assert opened > 0
+        calls.clear()
+        hass.states.async_set("binary_sensor.fenster_bad", "on")
+        await _tick(hass, freezer, coord, 20)
+        assert not z.window_open and z.valve_pct == opened
+        assert not any(c.data["value"] == 0 and "opening" in c.data["entity_id"] for c in calls)
+        hass.states.async_set("binary_sensor.fenster_bad", "off")
+        await _tick(hass, freezer, coord, 20)
+        assert z.learner.blocked_until < dt_util.utcnow().timestamp()  # kein Lernstopp
+        # diesmal länger offen: nach 1 min (Timer, kein Regeltakt nötig) → zu
+        hass.states.async_set("binary_sensor.fenster_bad", "on")
+        await hass.async_block_till_done()
+        freezer.tick(timedelta(seconds=65))
+        async_fire_time_changed(hass, dt_util.utcnow())
+        await hass.async_block_till_done()
+        assert z.window_open and z.valve_pct == 0
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_valve_stays_closed_15_min_after_window(hass: HomeAssistant, freezer) -> None:
+    """Nach dem Lüften wärmt sich die Luft aus Wänden und Möbeln selbst wieder auf – sofort heizen
+    überheizt. Deshalb 15 min zu lassen, danach sofort wieder regeln (nicht auf den Ventil-Takt warten)."""
+    async_mock_service(hass, "number", "set_value")
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry = await _setup(hass)
+        coord = entry.runtime_data
+        async_mock_service(hass, "climate", "set_hvac_mode")
+        async_mock_service(hass, "select", "select_option")
+        await _activate(hass, entry)
+        z = coord.zones["bad"]
+        hass.states.async_set("binary_sensor.fenster_bad", "on")
+        await _tick(hass, freezer, coord, 120)
+        assert z.valve_pct == 0
+        hass.states.async_set("binary_sensor.fenster_bad", "off")
+        await _tick(hass, freezer, coord, 5)
+        for _ in range(2):  # 10 min nach dem Schließen: noch zu
+            await _tick(hass, freezer, coord, 300)
+            assert z.valve_pct == 0 and z.decision.reason == "fenster"
+        assert "Nach dem Lüften" in hass.states.get("sensor.bad_erklaerung_lh").state
+        await _tick(hass, freezer, coord, 360)  # > 15 min
+        assert z.decision.reason != "fenster" and z.valve_pct > 0
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_new_zigbee2mqtt_sensor_names(hass: HomeAssistant) -> None:
+    """Zigbee2MQTT nennt die Fühlerwahl inzwischen local_temperature/remote_temperature."""
+    async_mock_service(hass, "number", "set_value")
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry = await _setup(hass)
+        opts = {"options": ["local_temperature", "remote_temperature", "remote_source_offline"]}
+        hass.states.async_set("select.bad_temperature_sensor_select", "local_temperature", opts)
+        async_mock_service(hass, "climate", "set_hvac_mode")
+        async_mock_service(hass, "climate", "set_temperature")
+        sel_calls = async_mock_service(hass, "select", "select_option")
+        await _activate(hass, entry)
+        assert [c.data["option"] for c in sel_calls] == ["remote_temperature"]
+        hass.states.async_set("select.bad_temperature_sensor_select", "remote_temperature", opts)
+        await hass.services.async_call("switch", "turn_off", {"entity_id": _eid(hass, entry, "switch", "master")}, blocking=True)
+        await hass.async_block_till_done()
+        assert sel_calls[-1].data["option"] == "local_temperature"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_room_temperature_resent_every_30_min(hass: HomeAssistant, freezer) -> None:
+    """Der Kopf soll den externen Fühler nicht für ausgefallen halten, nur weil die Temperatur gleich bleibt."""
+    calls = async_mock_service(hass, "number", "set_value")
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry = await _setup(hass)
+        coord = entry.runtime_data
+        async_mock_service(hass, "climate", "set_hvac_mode")
+        async_mock_service(hass, "select", "select_option")
+        await _activate(hass, entry)
+        ext = "number.bad_external_temperature_input"
+        hass.states.async_set(ext, "20.0")  # Kopf hat den Wert übernommen
+        calls.clear()
+        await _tick(hass, freezer, coord, 600)
+        assert not [c for c in calls if c.data["entity_id"] == ext]
+        for _ in range(4):
+            await _tick(hass, freezer, coord, 300)
+        assert [c for c in calls if c.data["entity_id"] == ext]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_explanation_shows_commanded_valve(hass: HomeAssistant) -> None:
+    async_mock_service(hass, "number", "set_value")
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry = await _setup(hass)
+        async_mock_service(hass, "climate", "set_hvac_mode")
+        async_mock_service(hass, "select", "select_option")
+        await _activate(hass, entry)
+        z = entry.runtime_data.zones["bad"]
+        assert f"Ventil {z.valve_pct} %" in hass.states.get("sensor.bad_erklaerung_lh").state
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_learning_pause_names_real_reason(hass: HomeAssistant) -> None:
+    """Nach Sommer → Winter stand „Fenster war gerade offen“, obwohl kein Fenster offen war."""
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    season = {"entity_id": _eid(hass, entry, "select", "season")}
+    await hass.services.async_call("select", "select_option", {**season, "option": "sommer"}, blocking=True)
+    await hass.services.async_call("select", "select_option", {**season, "option": "winter"}, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.heating_season
+    pause = hass.states.get("sensor.bad_erklaerung_lh").attributes["lernpause"]
+    assert pause and "Fenster" not in pause
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_cold_pipe_pauses_learning(hass: HomeAssistant, freezer) -> None:
+    """Ventil offen, Rohrfühler bleibt kalt → unklar, ob Wärme ankommt → nicht lernen (sonst hielte das
+    Modell die Heizkörper für schwach). Ein Fühler, der nie Vorlauf gezeigt hat, meldet keinen kalten Kessel."""
+    async_mock_service(hass, "number", "set_value")
+    _trv(hass, "bad")
+    hass.states.async_set("climate.bad", "heat", {"hvac_action": "heating", "min_temp": 4, "max_temp": 35})
+    hass.states.async_set("number.bad_valve_opening_degree", "80")
+    hass.states.async_set("sensor.bad_temp", "20.0", {"unit_of_measurement": "°C", "device_class": "temperature"})
+    hass.states.async_set("binary_sensor.fenster_bad", "off")
+    hass.states.async_set("sensor.rohr", "20.5", {"unit_of_measurement": "°C", "device_class": "temperature"})
+    hass.states.async_set("sensor.aussen", "2.0", {"unit_of_measurement": "°C", "device_class": "temperature"})
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN,
+                            data={CONF_ZONES: [ZONE], CONF_SUPPLY: "sensor.rohr", CONF_SUPPLY_ZONE: "bad",
+                                  CONF_OUTDOOR: "sensor.aussen"})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    for _ in range(12):  # 60 min
+        freezer.tick(timedelta(minutes=5))
+        for eid, val in (("sensor.rohr", "20.5"), ("sensor.bad_temp", "20.0")):
+            hass.states.async_set(eid, val, {"unit_of_measurement": "°C", "device_class": "temperature"}, force_update=True)
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+    assert coord.zones["bad"].learner.samples <= 1  # nur die Viertelstunde, bevor das Rohr als kalt gilt
+    expl = hass.states.get("sensor.bad_erklaerung_lh")
+    assert "Rohr" in expl.attributes["lernpause"]
+    assert not coord.supply.heat_missing(dt_util.utcnow().timestamp())
+    assert "Fühler" in hass.states.get("sensor.vorlauf_lh").attributes["rohrfuehler_status"]
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 

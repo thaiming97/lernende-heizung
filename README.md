@@ -12,7 +12,8 @@ auch mit anderen Thermostatköpfen.
 - **Plant 12 Stunden voraus**: heizt rechtzeitig vor, damit es zur Komfortzeit warm ist, hört
   vor einer Absenkung oder vor erwarteter Sonne früh genug auf.
 - **Stellt das Ventil direkt** (TRVZB: Öffnungs-/Schließgrad), batterieschonend gefiltert.
-- **Sicherheit**: Fenster offen → Ventil zu; Frostschutz; Raumsensor fehlt oder meldet sich
+- **Sicherheit**: Fenster/Tür länger als 1 min offen → Ventil zu, nach dem Schließen noch 15 min;
+  Frostschutz; Raumsensor fehlt oder meldet sich
   3 h nicht → feste mittlere Öffnung; passt das gelernte Modell nicht zur Messung → einfacher
   PI-Regler (Status „Sicherheitsbetrieb“); Hauptschalter aus → Thermostatköpfe regeln wieder
   selbst, mit ihrem eingebauten Fühler.

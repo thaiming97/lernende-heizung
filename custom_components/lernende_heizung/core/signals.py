@@ -207,6 +207,7 @@ class SupplyLearner:
     last_valid_ts: float | None = None
     no_heat: bool = False
     no_heat_ts: float = 0.0
+    cold_ts: float | None = None  # zuletzt: Ventil offen, Rohr aber kalt (unklar, ob Wärme ankommt)
 
     FLOW_MIN_K = 5.0  # Rohr so viel wärmer als der Raum → es fließt Heizwasser
     COLD_K = 3.0  # darunter trotz offenem Ventil: Kessel liefert nichts
@@ -223,6 +224,11 @@ class SupplyLearner:
     def heat_missing(self, ts: float) -> bool:
         """Kessel lieferte zuletzt (≤ 2 h) trotz offenem Ventil keine Wärme."""
         return self.no_heat and ts - self.no_heat_ts < 7200
+
+    def pipe_cold(self, ts: float) -> bool:
+        """Ventil seit 20 min offen, Rohr aber kaum wärmer als der Raum – ohne eindeutigen Befund
+        (kleine Öffnung oder Fühler hat noch nie Vorlauf gezeigt). Dann nicht lernen."""
+        return self.cold_ts is not None and ts - self.cold_ts < 900
 
     def curve_params(self) -> tuple[float, float, tuple[float, ...]] | None:
         """(Vorlauf bei −10 °C, bei +15 °C, Stundenversatz) – None, solange zu wenig gelernt."""
@@ -252,7 +258,7 @@ class SupplyLearner:
         if pipe is None or t_out is None:
             return
         if valve < self.OPEN_MIN:
-            self.open_since = self.wide_since = None
+            self.open_since = self.wide_since = self.cold_ts = None
             return
         if valve < self.COLD_OPEN_MIN:
             self.wide_since = None
@@ -265,13 +271,18 @@ class SupplyLearner:
             return
         if t_room is not None:
             wide_long = self.wide_since is not None and ts - self.wide_since >= 30 * 60
-            if pipe - t_room < self.COLD_K and wide_long:
+            # „Kessel kalt“ erst, wenn der Fühler schon einmal echten Vorlauf gezeigt hat – sonst sitzt
+            # er womöglich gar nicht am Rohr, und das Modell bekäme Vorlauf ≈ Raumtemperatur
+            if pipe - t_room < self.COLD_K and wide_long and self.n > 0:
                 self.no_heat, self.no_heat_ts = True, ts
                 self.last_valid, self.last_valid_ts = pipe, ts  # tatsächlich kommt kaum Wärme an
+                self.cold_ts = None
                 return
             if pipe - t_room < self.FLOW_MIN_K:
+                self.cold_ts = ts
                 return
         self.no_heat = False
+        self.cold_ts = None
         y = pipe + pipe_offset
         self.last_valid, self.last_valid_ts = y, ts
         if hour is not None:

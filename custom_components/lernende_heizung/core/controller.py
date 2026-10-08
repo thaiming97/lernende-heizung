@@ -308,6 +308,7 @@ class ZoneController:
         if window_open:
             self.u_eff = 0.0
             self.u_prev = None
+            self.last_plan_ts = None  # danach sofort neu planen, nicht mit 0 % bis zur nächsten Viertelstunde
             return Decision(0.0, 0.0, REASON_WINDOW, disturbance=self.d)
 
         tg = target_at(ts)

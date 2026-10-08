@@ -29,6 +29,9 @@ _KEYS = {
     "ext": ("external_temperature_input", "external_temperature"),
     "select": ("temperature_sensor_select", "temperature_sensor"),
 }
+# Fühlerwahl: ältere Zigbee2MQTT-Versionen nennen sie internal/external, neuere local_/remote_temperature
+SENSOR_EXTERNAL = ("external", "remote_temperature")
+SENSOR_INTERNAL = ("internal", "local_temperature")
 BUMP_DELAY_S = 5.0
 REASSERT_S = 900.0  # frühestens so oft erneut einschalten/umstellen, falls der Kopf nicht übernimmt
 ERROR_HOLD_S = 600.0  # so lange nach einem fehlgeschlagenen Befehl gilt die Stellung als unsicher
@@ -132,12 +135,12 @@ class TrvActuator:
             return val / 100 if heating else max(0.0, 100 - val) / 100
         return 1.0 if heating else 0.0
 
-    async def _number(self, key: str, value: float) -> bool:
+    async def _number(self, key: str, value: float, force: bool = False) -> bool:
         eid = self.entities.get(key)
         if not eid:
             return False
         st = self.hass.states.get(eid)
-        if st is not None and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        if not force and st is not None and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             try:
                 if abs(float(st.state) - value) < 0.05:
                     return True
@@ -169,20 +172,27 @@ class TrvActuator:
             self._heat_try = None
         sel = self.entities.get("select")
         sst = self.hass.states.get(sel) if sel else None
-        opts = (sst.attributes.get("options") if sst else None) or []
-        if sst is not None and sst.state != "external" and "external" in opts:
+        target = self._sensor_option(sst, SENSOR_EXTERNAL)
+        if sst is not None and target is not None and sst.state not in SENSOR_EXTERNAL:
             if self._sel_try is None or now_ts - self._sel_try >= REASSERT_S:
                 self._sel_try = now_ts
                 await self.hass.services.async_call(
-                    "select", "select_option", {ATTR_ENTITY_ID: sel, "option": "external"}, blocking=True
+                    "select", "select_option", {ATTR_ENTITY_ID: sel, "option": target}, blocking=True
                 )
         else:
             self._sel_try = None
 
+    @staticmethod
+    def _sensor_option(sst, names: tuple[str, ...]) -> str | None:
+        """Passende Option der Fühlerwahl (je nach Zigbee2MQTT-Version anders benannt)."""
+        opts = (sst.attributes.get("options") if sst else None) or []
+        return next((n for n in names if n in opts), None)
+
     async def set_room_temperature(self, value: float) -> None:
-        """Raumtemperatur an den TRV spiegeln (Anzeige am Kopf stimmt dann)."""
+        """Raumtemperatur an den TRV spiegeln (Anzeige am Kopf stimmt dann). Immer schreiben – auch
+        bei gleichem Wert, damit der Kopf den externen Fühler nicht für ausgefallen hält."""
         if "ext" in self.entities:
-            await self._number("ext", round(value, 1))
+            await self._number("ext", round(value, 1), force=True)
 
     async def set_valve(self, pct: int) -> None:
         pct = max(0, min(100, int(pct)))
@@ -238,9 +248,10 @@ class TrvActuator:
             await self._number("close", 100)
         sel = self.entities.get("select")
         sst = self.hass.states.get(sel) if sel else None
-        if sst is not None and sst.state != "internal" and "internal" in (sst.attributes.get("options") or []):
+        target = self._sensor_option(sst, SENSOR_INTERNAL)
+        if sst is not None and target is not None and sst.state != target:
             await self.hass.services.async_call(
-                "select", "select_option", {ATTR_ENTITY_ID: sel, "option": "internal"}, blocking=True
+                "select", "select_option", {ATTR_ENTITY_ID: sel, "option": target}, blocking=True
             )
         await self.hass.services.async_call(
             "climate", "set_temperature", {ATTR_ENTITY_ID: self.climate_id, "temperature": fallback_temp}, blocking=True

@@ -16,7 +16,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -48,6 +48,7 @@ from .const import (
     DEFAULT_HEATING_LIMIT,
     DEFAULT_SCHEDULE,
     DOMAIN,
+    EXT_TEMP_REFRESH_S,
     FALLBACK_MIN_SAMPLES,
     FALLBACK_RMSE,
     HEATING_LIMIT_HYST,
@@ -69,7 +70,9 @@ from .const import (
     STORE_SAVE_DELAY_S,
     STORE_SAVE_INTERVAL_S,
     STORE_VERSION,
+    WINDOW_DELAY_S,
     WINDOW_LEARN_PAUSE_S,
+    WINDOW_RESUME_S,
     WINDOW_SETTLE_S,
 )
 from .core.actuator import ValveGate
@@ -101,6 +104,11 @@ REASON_OBSERVE = "beobachten"
 FROST_C = 7.0
 SUN_DIRECT_KW = 0.05  # kW/m² direkte Sonne auf einer Fassade → Sonnenspitzen am Raumsensor möglich
 TRV_NOTICE_S = 3600  # so lange bleibt „Thermostat stand auf Aus“ in der Problemliste
+# Warum das Lernen gerade pausiert (Sensor „Erklärung“)
+PAUSE_WINDOW = "Fenster war gerade offen"
+PAUSE_SEASON = "Heizperiode hat gerade erst begonnen"
+PAUSE_VALVE = "Ventilstellung war gerade unsicher"
+PAUSE_COLD_PIPE = "Rohr kalt trotz offenem Ventil – unklar, ob Wärme ankommt"
 
 
 def _num(hass: HomeAssistant, entity_id: str | None, max_age_s: float | None = None) -> float | None:
@@ -155,7 +163,9 @@ class Zone:
     manual: float | None = None  # Handbetrieb (HVAC heat) – feste Temperatur
     override: float | None = None  # Temporäre Änderung im Zeitplanbetrieb
     override_until: float | None = None
-    window_open: bool = False
+    window_open: bool = False  # mindestens WINDOW_DELAY_S offen
+    window_closed_ts: float | None = None  # danach bleibt das Ventil WINDOW_RESUME_S zu
+    block_reason: str | None = None  # warum das Lernen zuletzt pausiert wurde
     temp: float | None = None
     valve_pct: int = 0  # von uns gestellt
     valve_obs: float | None = None  # beobachtet (Beobachtungsmodus, z. B. BT regelt)
@@ -168,6 +178,7 @@ class Zone:
     saving_pct: float | None = None
     saving_ts: float = 0.0
     last_ext_temp: float | None = None
+    last_ext_ts: float = 0.0
     controlling: bool = False
     valve_frac: float | None = None  # wirksame Stellung 0..1 (gestellt bzw. beobachtet), None = unbekannt
     primary_missing: bool = False
@@ -224,6 +235,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._clear_now = 0.5
         self.zones: dict[str, Zone] = {}
         self._unsubs: list = []
+        self._window_timers: set = set()
         self._last_ts: float | None = None
         self._saved_ts = 0.0
         self._build_zones()
@@ -272,15 +284,39 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._unsubs.append(async_track_state_change_event(self.hass, watch, self._on_window))
 
     async def async_shutdown(self) -> None:
-        for u in self._unsubs:
+        for u in [*self._unsubs, *self._window_timers]:
             u()
         self._unsubs.clear()
+        self._window_timers.clear()
         await self.store.async_save(self._export())
         await super().async_shutdown()
 
     @callback
-    def _on_window(self, _event: Event) -> None:
+    def _on_window(self, event: Event) -> None:
         self.hass.async_create_task(self.async_request_refresh())
+        new = event.data.get("new_state")
+        if new is not None and new.state == STATE_ON:
+            # zählt erst nach WINDOW_DELAY_S – dann ohne auf den nächsten Regeltakt zu warten prüfen
+            def _due(_now: datetime) -> None:
+                self._window_timers.discard(cancel)
+                self.hass.async_create_task(self.async_request_refresh())
+
+            cancel = async_call_later(self.hass, WINDOW_DELAY_S + 1, callback(_due))
+            self._window_timers.add(cancel)
+
+    def _window_is_open(self, z: Zone, now_ts: float) -> bool:
+        """Fenster/Tür gilt erst als offen, wenn sie WINDOW_DELAY_S offen steht (kurz rausgehen zählt nicht)."""
+        for w in z.cfg.get(CONF_WINDOWS, []):
+            st = self.hass.states.get(w)
+            if st is not None and st.state == STATE_ON and now_ts - st.last_changed.timestamp() >= WINDOW_DELAY_S:
+                return True
+        return False
+
+    @staticmethod
+    def _block(z: Zone, until: float, reason: str) -> None:
+        if until >= z.learner.blocked_until:
+            z.block_reason = reason
+        z.learner.block(until)
 
     # ------------------------------------------------------------------ Persistenz
     def _export(self) -> dict:
@@ -459,11 +495,14 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Raumtemperaturen (gefiltert), Fenster, Ventilstellung
         sun_direct = max(self.sun_now) > SUN_DIRECT_KW
         for z in self.zones.values():
-            z.window_open = any(
-                (st := self.hass.states.get(w)) is not None and st.state == STATE_ON for w in z.cfg.get(CONF_WINDOWS, [])
-            )
+            was_open = z.window_open
+            z.window_open = self._window_is_open(z, now_ts)
             if z.window_open:
                 z.last_window_ts = now_ts
+                z.window_closed_ts = None
+            elif was_open:  # gerade geschlossen (der Fensterkontakt löst sofort einen Takt aus)
+                z.last_window_ts = now_ts
+                z.window_closed_ts = now_ts
             prim = _num(self.hass, z.cfg.get(CONF_TEMP), SENSOR_STALE_S)
             sec = _num(self.hass, z.cfg.get(CONF_TEMP2), SENSOR_STALE_S)
             z.primary_missing = prim is None
@@ -516,14 +555,18 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Lernen (auch im Beobachtungsmodus, sofern die Ventilstellung bekannt ist). Im Sommer
             # pausiert es: offene Fenster, Sommerlüftung und starke Sonne passen nicht zum Winter, und
             # der Zug zum Startwert würde das Gelernte über die Heizkörper langsam vergessen.
-            if z.window_open:
-                z.learner.block(now_ts + WINDOW_LEARN_PAUSE_S)
+            if z.last_window_ts == now_ts:  # offen oder gerade geschlossen
+                self._block(z, now_ts + WINDOW_LEARN_PAUSE_S, PAUSE_WINDOW)
             if summer:
-                z.learner.block(now_ts + CYCLE_S)
-            elif valve_frac is not None:
-                z.learner.add(now_ts, z.temp, x, valve_frac)
+                self._block(z, now_ts + CYCLE_S, PAUSE_SEASON)
+            elif valve_frac is None:
+                self._block(z, now_ts + CYCLE_S, PAUSE_VALVE)
+            elif valve_frac > 0.02 and self.supply.pipe_cold(now_ts):
+                # Ventil offen, Rohr kalt: kommt Wärme an? Unklar → nicht lernen (sonst wirken die
+                # Heizkörper im Modell schwächer, als sie sind)
+                self._block(z, now_ts + CYCLE_S, PAUSE_COLD_PIPE)
             else:
-                z.learner.block(now_ts + CYCLE_S)
+                z.learner.add(now_ts, z.temp, x, valve_frac)
             valve_frac = valve_frac or 0.0
             if now_ts - z.params_ts >= PARAM_REFRESH_S:
                 z.controller.params = z.learner.params()
@@ -542,18 +585,21 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 tgt = lambda ts, z=z: self.target_at(z, ts)  # noqa: E731
                 # Modell sagt die Raumtemperatur dauerhaft schlecht voraus → einfacher PI-Regler
                 bad_model = z.learner.samples >= FALLBACK_MIN_SAMPLES and z.learner.rmse() > FALLBACK_RMSE
+                closed = z.window_open or self._window_wait_until(z, now_ts) is not None
                 dec = await self.hass.async_add_executor_job(
                     lambda: z.controller.decide(
                         now_ts, z.temp, x, tgt, self.t_out_at(now_ts), self.sun_at(now_ts),
-                        window_open=z.window_open, use_fallback=bad_model, replan_s=REPLAN_S,
+                        window_open=closed, use_fallback=bad_model, replan_s=REPLAN_S,
                     )
                 )
                 if z.hvac_off and dec.reason not in ("frostschutz", "fenster"):
                     dec = Decision(0.0, 0.0, REASON_OFF)
             if not controlling:
                 dec = Decision(dec.u_eff, dec.valve, REASON_OBSERVE if self.master_on else REASON_OFF, dec.plan, dec.disturbance)
+            # Ende der Fensterpause: sofort stellen, nicht erst nach dem Mindestabstand zwischen Ventilbefehlen
+            resume = z.decision is not None and z.decision.reason == "fenster" and dec.reason != "fenster"
             z.decision = dec
-            await self._actuate(z, dec, now_ts, controlling)
+            await self._actuate(z, dec, now_ts, controlling, force=resume)
             await self._update_saving(z, now_ts, x)
             self._describe(z, now_ts, summer)
 
@@ -562,6 +608,14 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._saved_ts = now_ts
             self.store.async_delay_save(self._export, 0)
         return {"ts": now_ts}
+
+    @staticmethod
+    def _window_wait_until(z: Zone, now_ts: float) -> float | None:
+        """Fenster wieder zu, Ventil bleibt aber noch zu: bis wann? (None = keine Wartezeit)"""
+        if z.window_open or z.window_closed_ts is None:
+            return None
+        until = z.window_closed_ts + WINDOW_RESUME_S
+        return until if now_ts < until else None
 
     def _valve_frac(self, z: Zone, now_ts: float) -> float | None:
         """Ventilstellung 0..1: gestellt (aktiv) bzw. am TRV abgelesen (beobachten); None = unbekannt."""
@@ -585,6 +639,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return "keine Zone gewählt (Konfigurieren → Vorlauffühler)"
         if s.heat_missing(now_ts):
             return "Kessel liefert keine Wärme – Rohr kalt trotz offenem Ventil"
+        if s.pipe_cold(now_ts) and s.n == 0:
+            return "zählt nicht – Rohr bleibt kalt trotz offenem Ventil: sitzt der Fühler am Vorlaufrohr?"
         if s.measured(now_ts) is not None:
             return "zählt – Heizwasser fließt"
         if sz.valve_frac is None:
@@ -639,7 +695,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if 0 <= k < len(plan.t_pred):
                 t_at_change = float(plan.t_pred[k])
         preheat_ts = now_ts + plan.preheat_start_h * 3600 if plan is not None and plan.preheat_start_h is not None else None
-        valve_now = int(round(100 * (z.valve_frac or 0.0)))
+        # aktiv geregelt: was gerade gestellt wurde (die abgelesene Stellung hinkt einen Takt hinterher)
+        valve_now = z.valve_pct if z.controlling and z.controlled else int(round(100 * (z.valve_frac or 0.0)))
         want = int(round(100 * d.valve)) if d else 0
         paused = None
         if not summer:
@@ -648,7 +705,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             elif z.temp is None:
                 paused = "kein Raumwert"
             elif not z.window_open and now_ts < z.learner.blocked_until:
-                paused = "Fenster war gerade offen"
+                paused = z.block_reason or "kurz pausiert"
         rmse = z.learner.rmse()
         sun3 = self._sun_gain(z, now_ts) if not summer else 0.0
         heat_missing = self.supply.heat_missing(now_ts) and not summer
@@ -660,7 +717,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             t_out_mean24=self.t_out_mean24,
             heating_limit=float(self.opts.get(CONF_HEATING_LIMIT, DEFAULT_HEATING_LIMIT)),
             heat_missing=heat_missing, master_on=self.master_on, hvac_off=z.hvac_off,
-            learning_paused=paused,
+            learning_paused=paused, window_wait_until=self._window_wait_until(z, now_ts),
         )
         z.explanation = explain(sit)
         p = z.controller.params
@@ -713,7 +770,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Sonntags 11 Uhr, wenn das Ventil seit über einer Woche zu war."""
         return local.weekday() == 6 and local.hour == 11 and local.minute < 10 and now_ts - z.last_open_ts > 7 * 86400
 
-    async def _actuate(self, z: Zone, dec: Decision, now_ts: float, controlling: bool) -> None:
+    async def _actuate(self, z: Zone, dec: Decision, now_ts: float, controlling: bool, force: bool = False) -> None:
         if not controlling:
             if z.controlled:
                 for t in z.trvs:
@@ -723,13 +780,17 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         _LOGGER.warning("%s: TRV %s freigeben fehlgeschlagen: %s", z.name, t.climate_id, err)
                 z.controlled = False
                 z.gate = ValveGate()
+                z.last_ext_temp = None  # beim nächsten Übernehmen sofort die Raumtemperatur schicken
             z.valve_pct = 0
             return
         want = int(round(100 * dec.valve))
         first = not z.controlled
-        force = first or dec.reason in ("fenster", "frostschutz")
+        force = force or first or dec.reason in ("fenster", "frostschutz")
         sent = z.gate.decide(now_ts, want, force=force)
-        send_ext = z.temp is not None and (z.last_ext_temp is None or abs(z.temp - z.last_ext_temp) >= 0.3)
+        # bei Änderung, sonst spätestens alle 30 min (der Kopf soll den Fühler nicht für ausgefallen halten)
+        send_ext = z.temp is not None and (
+            z.last_ext_temp is None or abs(z.temp - z.last_ext_temp) >= 0.3 or now_ts - z.last_ext_ts >= EXT_TEMP_REFRESH_S
+        )
         all_ok = True
         for t in z.trvs:
             try:
@@ -746,7 +807,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 all_ok = False
                 _LOGGER.warning("%s: TRV %s nicht erreichbar: %s", z.name, t.climate_id, err)
         if send_ext and all_ok:
-            z.last_ext_temp = z.temp
+            z.last_ext_temp, z.last_ext_ts = z.temp, now_ts
         z.controlled = True
         if sent is not None:
             z.valve_pct = sent

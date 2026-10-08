@@ -33,6 +33,7 @@ class Situation:
     master_on: bool = True
     hvac_off: bool = False
     learning_paused: str | None = None
+    window_wait_until: float | None = None  # Fenster wieder zu, Ventil bleibt bis dahin zu
 
 
 def _n(x: float, d: int = 1) -> str:
@@ -45,7 +46,10 @@ def explain(s: Situation) -> str:
     sp = _n(s.setpoint)
     r = s.reason
 
-    if r == "fenster":
+    if r == "fenster" and s.window_wait_until:
+        parts.append(f"Nach dem Lüften: Ventil bleibt bis {s.fmt_time(s.window_wait_until)} zu – "
+                     "die Luft wärmt sich erst aus Wänden und Möbeln wieder auf.")
+    elif r == "fenster":
         parts.append("Fenster offen – Ventil zu, Lernen pausiert.")
     elif r == "frostschutz":
         parts.append(f"Frostschutz: nur {_n(t or 0)} °C – Ventil ganz auf.")
