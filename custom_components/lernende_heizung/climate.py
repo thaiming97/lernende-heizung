@@ -74,8 +74,10 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
         z = self.zone
         d = z.decision
         attrs: dict[str, Any] = {"grund": d.reason if d else None, "ventil": z.valve_pct, "aktiv": z.active}
-        if z.override is not None and z.override_until and time.time() < z.override_until:
-            attrs["uebersteuert_bis"] = time.strftime("%H:%M", time.localtime(z.override_until))
+        if self.coordinator.override_active(z, time.time()):
+            attrs["uebersteuert_bis"] = (
+                time.strftime("%H:%M", time.localtime(z.override_until)) if z.override_until else "Preset-/Moduswechsel"
+            )
         if d and d.plan is not None:
             attrs["vorhersage"] = [round(float(t), 2) for t in d.plan.t_pred[3::4][:12]]  # stündlich, 12 h
         return attrs
@@ -116,4 +118,5 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         self.zone.preset = preset_mode
         self.zone.override = None
+        self.zone.manual = None  # Presets gelten nur in Automatik – „Heizen“ (feste Temperatur) endet damit
         await self._changed()

@@ -317,10 +317,49 @@ async def test_cold_pipe_pauses_learning(hass: HomeAssistant, freezer) -> None:
         await coord.async_refresh()
         await hass.async_block_till_done()
     assert coord.zones["bad"].learner.samples <= 1  # nur die Viertelstunde, bevor das Rohr als kalt gilt
+    # pausiert, aber Speichermasse/Heizkörper laufen weiter (sonst stimmen sie nach der Pause nicht)
+    assert coord.zones["bad"].learner.last_ts == dt_util.utcnow().timestamp()
     expl = hass.states.get("sensor.bad_erklaerung_lh")
     assert "Rohr" in expl.attributes["lernpause"]
     assert not coord.supply.heat_missing(dt_util.utcnow().timestamp())
     assert "Fühler" in hass.states.get("sensor.vorlauf_lh").attributes["rohrfuehler_status"]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_preset_ends_manual_heat_mode(hass: HomeAssistant) -> None:
+    """Im Modus „Heizen“ hatte die Wahl Komfort/Eco/Weg keine Wirkung – jetzt geht es zurück auf Automatik."""
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    cid = _eid(hass, entry, "climate", "bad_climate")
+    await hass.services.async_call("climate", "set_hvac_mode", {"entity_id": cid, "hvac_mode": "heat"}, blocking=True)
+    await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 20.0}, blocking=True)
+    await hass.services.async_call("climate", "set_preset_mode", {"entity_id": cid, "preset_mode": "eco"}, blocking=True)
+    await hass.async_block_till_done()
+    st = hass.states.get(cid)
+    assert st.state == "auto" and st.attributes["temperature"] == 21.5
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_temperature_change_lasts_without_schedule_change(hass: HomeAssistant, freezer) -> None:
+    """Zeitplan „immer“: Es gibt keinen Wechsel, an dem die Änderung enden könnte – vorher fiel sie nach
+    4 h stillschweigend zurück. Jetzt bleibt sie (auch über einen Neustart) bis Preset/Modus/Anwesenheit."""
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    cid = _eid(hass, entry, "climate", "bad_climate")
+    await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 22.0}, blocking=True)
+    await hass.async_block_till_done()
+    freezer.tick(timedelta(hours=5))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).attributes["temperature"] == 22.0
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).attributes["temperature"] == 22.0
+    await hass.services.async_call("climate", "set_preset_mode", {"entity_id": cid, "preset_mode": "none"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).attributes["temperature"] == 23.5
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -596,6 +635,45 @@ async def test_supply_sensor_learns_in_observe_mode(hass: HomeAssistant, freezer
     sup = hass.states.get("sensor.vorlauf_lh")
     assert sup.attributes["quelle"] == "Heizkurve" and sup.attributes["rohrfuehler"] == 30.0
     assert sup.attributes["rohrfuehler_status"] == "zählt nicht – Ventil Bad zu"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_model_uses_measured_supply_once_curve_learned(hass: HomeAssistant, freezer) -> None:
+    """Die Startwerte der Heizwirkung passen zur angenommenen Heizkurve. Vor dem Lernen der Kurve ließe ein
+    Messwert (z. B. 31 statt 37 °C) die Heizkörper viel zu schwach erscheinen – das Modell nimmt den
+    gemessenen Vorlauf deshalb erst, wenn die Kurve gelernt (und die Heizwirkung umgerechnet) ist."""
+    async_mock_service(hass, "number", "set_value")
+    _trv(hass, "bad")
+    hass.states.async_set("climate.bad", "heat", {"hvac_action": "heating", "min_temp": 4, "max_temp": 35})
+    hass.states.async_set("number.bad_valve_opening_degree", "80")
+    hass.states.async_set("binary_sensor.fenster_bad", "off")
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN,
+                            data={CONF_ZONES: [ZONE], CONF_SUPPLY: "sensor.rohr", CONF_SUPPLY_ZONE: "bad",
+                                  CONF_OUTDOOR: "sensor.aussen"})
+
+    def feed() -> None:
+        for eid, val in (("sensor.rohr", "29.0"), ("sensor.bad_temp", "20.0"), ("sensor.aussen", "13.0")):
+            hass.states.async_set(eid, val, {"unit_of_measurement": "°C", "device_class": "temperature"}, force_update=True)
+
+    feed()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    for _ in range(10):
+        freezer.tick(timedelta(minutes=5))
+        feed()
+        await coord.async_refresh()
+    assert 0 < coord.supply.n < 30
+    assert coord.supply.measured(dt_util.utcnow().timestamp()) == 31.0
+    assert coord.t_supply == coord.curve.supply(13.0, dt_util.now().hour)  # Modell: noch Heizkurve
+    sup = hass.states.get("sensor.vorlauf_lh")
+    assert float(sup.state) == 31.0 and "/30" in sup.attributes["rohrfuehler_status"]  # Anzeige: Messwert
+    for _ in range(30):
+        freezer.tick(timedelta(minutes=5))
+        feed()
+        await coord.async_refresh()
+    assert coord.supply.curve_params() is not None and coord.t_supply == 31.0
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 

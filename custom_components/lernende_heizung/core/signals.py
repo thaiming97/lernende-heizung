@@ -269,28 +269,23 @@ class SupplyLearner:
             return
         if ts - self.open_since < 20 * 60:
             return
-        if t_room is not None:
-            wide_long = self.wide_since is not None and ts - self.wide_since >= 30 * 60
-            # „Kessel kalt“ erst, wenn der Fühler schon einmal echten Vorlauf gezeigt hat – sonst sitzt
-            # er womöglich gar nicht am Rohr, und das Modell bekäme Vorlauf ≈ Raumtemperatur
-            if pipe - t_room < self.COLD_K and wide_long and self.n > 0:
-                self.no_heat, self.no_heat_ts = True, ts
-                self.last_valid, self.last_valid_ts = pipe, ts  # tatsächlich kommt kaum Wärme an
-                self.cold_ts = None
-                return
-            if pipe - t_room < self.FLOW_MIN_K:
-                self.cold_ts = ts
-                return
+        if t_room is None:
+            return  # ohne Raumwert unklar, ob Heizwasser fließt
+        wide_long = self.wide_since is not None and ts - self.wide_since >= 30 * 60
+        # „Kessel kalt“ erst, wenn der Fühler schon einmal echten Vorlauf gezeigt hat – sonst sitzt
+        # er womöglich gar nicht am Rohr, und das Modell bekäme Vorlauf ≈ Raumtemperatur
+        if pipe - t_room < self.COLD_K and wide_long and self.n > 0:
+            self.no_heat, self.no_heat_ts = True, ts
+            self.last_valid, self.last_valid_ts = pipe, ts  # tatsächlich kommt kaum Wärme an
+            self.cold_ts = None
+            return
+        if pipe - t_room < self.FLOW_MIN_K:
+            self.cold_ts = ts
+            return
         self.no_heat = False
         self.cold_ts = None
         y = pipe + pipe_offset
         self.last_valid, self.last_valid_ts = y, ts
-        if hour is not None:
-            h = hour % 24
-            c = self.hour_n[h]
-            a = max(0.05, 1.0 / (c + 1))
-            self.hour_off[h] += a * ((y - (self.a + self.b * t_out)) - self.hour_off[h])
-            self.hour_n[h] = c + 1
         lam = 0.999
         self._w = lam * self._w + 1
         self._sx = lam * self._sx + t_out
@@ -305,18 +300,34 @@ class SupplyLearner:
         elif self.n >= 10:
             # nur Niveau anpassen
             self.a = self._sy / self._w - self.b * self._sx / self._w
+        # Versatz je Tagesstunde erst, wenn das Niveau gemessen ist – vorher wäre die Abweichung von der
+        # angenommenen Kurve fälschlich eine „Absenkung“ genau der Stunden, in denen zuerst gemessen wurde
+        if hour is not None and self.n >= 10:
+            h = hour % 24
+            c = self.hour_n[h]
+            a = max(0.05, 1.0 / (c + 1))
+            self.hour_off[h] += a * ((y - (self.a + self.b * t_out)) - self.hour_off[h])
+            self.hour_n[h] = c + 1
 
     def supply(self, t_out: float) -> float:
         return min(75.0, max(25.0, self.a + self.b * t_out))
 
+    VERSION = 2  # 2: Stundenversatz erst ab gemessenem Niveau (ältere Stände verwerfen ihn)
+
     def export(self) -> dict:
         d = {k: getattr(self, k) for k in ("a", "b", "n", "_sxx", "_sx", "_sy", "_sxy", "_w")}
         d["hour_off"], d["hour_n"] = list(self.hour_off), list(self.hour_n)
+        d["version"] = self.VERSION
         return d
 
     def restore(self, raw: dict) -> None:
+        old = raw.get("version", 1) != self.VERSION
         for k, v in raw.items():
+            if k == "version":
+                continue
             if k in ("hour_off", "hour_n"):
+                if old:
+                    continue
                 if isinstance(v, list) and len(v) == 24 and all(isinstance(x, (int, float)) and math.isfinite(x) for x in v):
                     setattr(self, k, [float(x) if k == "hour_off" else int(x) for x in v])
             elif hasattr(self, k) and isinstance(v, (int, float)) and math.isfinite(v):

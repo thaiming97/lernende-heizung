@@ -4,6 +4,26 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.5.6 – 2026-10-08
+
+Fehlerkorrekturen aus einer gründlichen Gesamtprüfung:
+
+- **Vorlauffühler – falsche „Absenkung“**: In der ersten Stunde mit Messwerten wurde die Abweichung von
+  der angenommenen Heizkurve als Absenkung genau dieser Uhrzeit gelernt (z. B. „17 Uhr: −6 K“). Der
+  Stundenversatz wird jetzt erst gelernt, wenn das Niveau gemessen ist. Bisher Gelerntes dazu wird beim
+  Update einmal verworfen und neu gelernt (die Heizkurve selbst bleibt).
+- **Vorlauffühler – Übergang**: Das Modell rechnet erst mit dem gemessenen Vorlauf, wenn die Heizkurve
+  gelernt ist (30 Messungen). Vorher hätte ein einzelner Messwert die Heizkörper viel zu schwach
+  erscheinen lassen. Der Sensor „Vorlauf“ zeigt trotzdem gleich den Messwert, der Status den
+  Fortschritt („Heizkurve wird gelernt: 12/30 Messungen“).
+- Ohne Raumtemperatur zählt der Vorlauffühler nicht (es lässt sich nicht sagen, ob Wasser fließt).
+- **Temperatur mit +/− bei Zeitplan „immer“** bleibt jetzt bestehen – bisher sprang sie nach 4 Stunden
+  stillschweigend zurück. Sie gilt (auch über einen Neustart) bis zum nächsten Wechsel im Zeitplan bzw.
+  bis Preset, Modus oder Anwesenheit geändert werden.
+- **Komfort/Eco/Weg im Modus „Heizen“** hatte keine Wirkung. Die Auswahl schaltet jetzt auf Automatik.
+- Lernen: Während einer Lernpause (Fenster, Sommer, kaltes Rohr) laufen Speichermasse und Heizkörper im
+  Modell mit der gemessenen Raumtemperatur weiter – vorher mit dem letzten Wert vor der Pause.
+
 ## 0.5.5 – 2026-10-08
 
 Erfahrungen aus dem ersten Heiztag:

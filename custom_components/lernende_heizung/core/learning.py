@@ -138,9 +138,11 @@ class ZoneLearner:
 
     def add(self, ts: float, t_meas: float | None, x: Inputs, valve: float) -> None:
         """Messung alle paar Minuten. valve = tatsächlich gesendete Öffnung (0..1)."""
-        if t_meas is None or not math.isfinite(t_meas) or ts < self.blocked_until:
+        valid = t_meas is not None and math.isfinite(t_meas)
+        if not valid or ts < self.blocked_until:
             self.acc = _Acc()
-            self._advance_states(ts, None, x, valve)
+            # pausiert: nicht lernen, aber Masse/Heizkörper mit der gemessenen Temperatur weiterführen
+            self._advance_states(ts, t_meas if valid else None, x, valve)
             return
         a = self.acc
         if a.t0 is None:

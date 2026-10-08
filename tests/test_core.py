@@ -237,6 +237,19 @@ def test_learner_recovers_parameters():
     assert 0.04 < p.g0 < 0.2, p.g0  # Grundwärme erkannt
 
 
+def test_learner_tracks_room_while_paused():
+    """Während einer Lernpause (z. B. Fenster offen) laufen Speichermasse und Heizkörper mit der
+    gemessenen Raumtemperatur weiter – vorher mit dem letzten Wert vor der Pause."""
+    L = ZoneLearner(ZoneParams())
+    x = Inputs(t_out=0.0)
+    L.add(0.0, 21.0, x, 0.0)
+    L.add(300.0, 21.0, x, 0.0)
+    L.block(3600.0)
+    for k in range(2, 8):  # Lüften: Raum fällt auf 18 °C
+        L.add(k * 300.0, 21.0 - 0.5 * k + 0.5, x, 0.0)
+    assert all(c.state is not None and c.state.t == 18.0 for c in L.cands)
+
+
 def test_learner_export_restore_and_migration():
     prior = ZoneParams()
     L = ZoneLearner(prior)
@@ -334,9 +347,9 @@ def test_supply_learner_curve():
     for _ in range(300):
         tout = rnd.uniform(-8, 12)
         pipe = 50.0 - 0.9 * tout - 2.0  # Rohr 2 K unter Vorlauf
-        sl.update(ts, pipe, tout, valve=0.0)
-        sl.update(ts + 60, pipe, tout, valve=0.8)
-        sl.update(ts + 1500, pipe, tout, valve=0.8)
+        sl.update(ts, pipe, tout, valve=0.0, t_room=21.0)
+        sl.update(ts + 60, pipe, tout, valve=0.8, t_room=21.0)
+        sl.update(ts + 1500, pipe, tout, valve=0.8, t_room=21.0)
         ts += 3600
     assert abs(sl.supply(0.0) - 50.0) < 1.0
     assert abs(sl.b + 0.9) < 0.1
@@ -447,6 +460,46 @@ def test_supply_learner_flags_cold_pipe_at_small_opening():
     assert not sl.pipe_cold(ts)
     sl.update(ts + 300, 22.0, 2.0, 0.0, t_room=21.0, hour=12)  # Ventil zu → egal
     assert not sl.pipe_cold(ts + 300)
+
+
+def test_supply_hour_offset_learned_against_measured_level():
+    """Die ersten Messungen liegen 5–6 K unter der angenommenen Kurve: Das ist das Niveau des Kessels,
+    keine Absenkung zu dieser Uhrzeit. Vorher „lernte“ die erste Stunde einen falschen Stundenversatz."""
+    sl = SupplyLearner()
+    ts = 17 * 3600.0
+    for _ in range(40):  # gut 3 h ab 17 Uhr, Rohr 29 °C bei 13 °C außen
+        sl.update(ts, 29.0, 13.0, 1.0, t_room=21.0, hour=int(ts // 3600) % 24)
+        ts += 300
+    m10, p15, offs = sl.curve_params()
+    curve = HeatingCurve(tvl_at_m10=m10, tvl_at_p15=p15, hour_offset=offs)
+    for h in (17, 18, 19):
+        assert abs(curve.supply(13.0, h) - 31.0) < 0.5, (h, curve.supply(13.0, h))
+    assert sl.night_setback() is None
+
+
+def test_supply_restore_drops_hour_offsets_of_old_version():
+    """Stundenversatz aus Versionen bis 0.5.5 ist womöglich gegen die angenommene Kurve gelernt → verwerfen."""
+    old = SupplyLearner().export()
+    old.pop("version", None)
+    old.update(n=12, hour_off=[-5.6] + [0.0] * 23, hour_n=[9] + [0] * 23)
+    sl = SupplyLearner()
+    sl.restore(old)
+    assert sl.n == 12 and sl.hour_off == [0.0] * 24 and sl.hour_n == [0] * 24
+    new = SupplyLearner()
+    new.hour_off[3], new.hour_n[3] = -6.0, 7
+    sl2 = SupplyLearner()
+    sl2.restore(new.export())
+    assert sl2.hour_off[3] == -6.0 and sl2.hour_n[3] == 7
+
+
+def test_supply_learner_needs_room_temperature():
+    """Ohne Raumwert lässt sich nicht sagen, ob Heizwasser fließt → nichts lernen."""
+    sl = SupplyLearner()
+    ts = 0.0
+    for _ in range(10):
+        sl.update(ts, 22.0, 5.0, 0.8, t_room=None, hour=12)
+        ts += 300
+    assert sl.n == 0 and sl.measured(ts) is None
 
 
 def test_curve_change_keeps_learned_heating_effect():

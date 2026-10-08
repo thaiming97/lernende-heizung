@@ -223,7 +223,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.sun = SunModel(hass.config.latitude, hass.config.longitude)
         self.supply = SupplyLearner()
         self.curve = HeatingCurve()
-        self.t_supply: float | None = None
+        self.t_supply: float | None = None  # Vorlauf fürs Modell
+        self.supply_shown: float | None = None  # Vorlauf für die Anzeige (Messwert, sobald es einen gibt)
         self.supply_pipe: float | None = None  # Rohwert des Vorlauffühlers (für die Anzeige)
         self.supply_note: str | None = None  # warum der Fühler gerade zählt bzw. nicht
         self.t_out: float | None = None
@@ -334,6 +335,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "zones": {
                 zid: {
                     "active": z.active, "preset": z.preset, "hvac_off": z.hvac_off, "manual": z.manual,
+                    "override": z.override, "override_until": z.override_until,
                     "energy_kwh": z.energy_kwh, "learner": z.learner.export(), "controller": z.controller.export(),
                     "filter_offset": z.filt.offset, "filter_n": z.filt.n,
                 }
@@ -363,6 +365,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             z.preset = zr.get("preset", PRESET_SCHEDULE)
             z.hvac_off = bool(zr.get("hvac_off", False))
             z.manual = zr.get("manual")
+            ov, ov_until = zr.get("override"), zr.get("override_until")
+            if isinstance(ov, (int, float)) and (ov_until is None or isinstance(ov_until, (int, float))):
+                z.override, z.override_until = float(ov), ov_until
             z.energy_kwh = float(zr.get("energy_kwh", 0.0))
             z.learner.restore(zr.get("learner", {}))
             z.controller.restore(zr.get("controller", {}))
@@ -379,7 +384,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return Target(FROST_C, False)
         # Von Hand verstellte Temperatur gilt bis zum nächsten Zeitplanwechsel – auch bei Preset
         # oder Abwesenheit (vorher wurde sie dort stillschweigend ignoriert)
-        if z.override is not None and z.override_until and ts < z.override_until:
+        if self.override_active(z, ts):
             return Target(z.override, True)
         if self.presence == PRESENCE_AWAY:
             return Target(z.away, False)
@@ -399,11 +404,15 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return Target(z.comfort, True) if z.schedule.is_comfort(local) else Target(z.eco, False)
 
     def set_override(self, z: Zone, temp: float) -> None:
-        """Temporäre Sollwertänderung im Zeitplanbetrieb – bis zum nächsten Zeitplanwechsel."""
-        now = dt_util.now()
-        nxt = z.schedule.next_change(now)
+        """Sollwertänderung im Zeitplanbetrieb – bis zum nächsten Zeitplanwechsel. Gibt es keinen
+        (Zeitplan „immer“), bleibt sie, bis Preset, Modus oder Anwesenheit wechseln (vorher: 4 h)."""
+        nxt = z.schedule.next_change(dt_util.now())
         z.override = temp
-        z.override_until = (nxt or now + timedelta(hours=4)).timestamp()
+        z.override_until = nxt.timestamp() if nxt else None
+
+    @staticmethod
+    def override_active(z: Zone, ts: float) -> bool:
+        return z.override is not None and (z.override_until is None or ts < z.override_until)
 
     # ------------------------------------------------------------------ Vorhersagen
     async def _refresh_forecast(self, now_ts: float) -> None:
@@ -523,7 +532,14 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._update_curve()
         t_out_now = self.t_out if self.t_out is not None else 5.0
         measured = self.supply.measured(now_ts)
-        self.t_supply = measured if measured is not None else self.curve.supply(t_out_now, local.hour)
+        # Das Modell nimmt den Messwert erst mit gelernter Heizkurve: Die Startwerte der Heizwirkung passen
+        # zur angenommenen Kurve, erst beim Übernehmen der gelernten wird die Heizwirkung umgerechnet.
+        # Ausnahme: Kessel kalt – dann kommt ohnehin keine Wärme an.
+        use_measured = measured is not None and (
+            self.supply.curve_params() is not None or self.supply.heat_missing(now_ts)
+        )
+        self.t_supply = measured if use_measured else self.curve.supply(t_out_now, local.hour)
+        self.supply_shown = measured if measured is not None else self.t_supply
 
         if self.season == SEASON_SUMMER:
             summer = True
@@ -565,8 +581,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Ventil offen, Rohr kalt: kommt Wärme an? Unklar → nicht lernen (sonst wirken die
                 # Heizkörper im Modell schwächer, als sie sind)
                 self._block(z, now_ts + CYCLE_S, PAUSE_COLD_PIPE)
-            else:
-                z.learner.add(now_ts, z.temp, x, valve_frac)
+            if valve_frac is not None:
+                z.learner.add(now_ts, z.temp, x, valve_frac)  # in einer Pause: nur Zustände fortschreiben
             valve_frac = valve_frac or 0.0
             if now_ts - z.params_ts >= PARAM_REFRESH_S:
                 z.controller.params = z.learner.params()
@@ -642,6 +658,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if s.pipe_cold(now_ts) and s.n == 0:
             return "zählt nicht – Rohr bleibt kalt trotz offenem Ventil: sitzt der Fühler am Vorlaufrohr?"
         if s.measured(now_ts) is not None:
+            if s.curve_params() is None:
+                return f"zählt – Heizwasser fließt (Heizkurve wird gelernt: {s.n}/30 Messungen)"
             return "zählt – Heizwasser fließt"
         if sz.valve_frac is None:
             return f"zählt nicht – Ventilstellung {sz.name} unbekannt"
@@ -732,7 +750,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lernt": not summer and paused is None and not z.window_open,
             "lernpause": "Sommer" if summer else ("Fenster offen" if z.window_open else paused),
             "heizperiode": not summer,
-            "vorlauf": None if self.t_supply is None else round(self.t_supply, 1),
+            "vorlauf": None if self.supply_shown is None else round(self.supply_shown, 1),
             "vorlauf_quelle": "gemessen" if self.supply.measured(now_ts) is not None else "Heizkurve",
         }
         if plan is not None:
@@ -841,5 +859,5 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return 1000 * steady_heat_demand(z.controller.params, tgt.setpoint, self.t_out) * z.controller.params.c_eff_kwh_per_k
 
     def estimated_supply(self) -> float | None:
-        """Vorlauf jetzt: gemessen, wenn der Fühler gerade gültig ist, sonst aus der Heizkurve."""
-        return self.t_supply
+        """Vorlauf jetzt (Anzeige): gemessen, wenn der Fühler gerade gültig ist, sonst aus der Heizkurve."""
+        return self.supply_shown
