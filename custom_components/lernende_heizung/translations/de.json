@@ -30,6 +30,7 @@
           "comfort_temp": "Komforttemperatur",
           "eco_delta": "Absenkung außerhalb der Komfortzeiten",
           "away_temp": "Temperatur bei Abwesenheit/Urlaub",
+          "sofi_temp": "Temperatur, wenn Sofi da ist (optional)",
           "schedule": "Komfortzeiten",
           "radiator_kw": "Heizkörper-Nennleistung gesamt (Startwert)",
           "area_m2": "Fläche der Zone (Startwert)"
@@ -37,7 +38,8 @@
         "data_description": {
           "schedule": "z. B. „Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30“ oder „immer“",
           "radiator_kw": "Grob reicht: Typ 11 ≈ 0,8 kW je Meter, Typ 21 ≈ 1,2, Typ 22 ≈ 1,6 (60 cm hoch). Das Modell lernt den echten Wert.",
-          "temp_sensor_2": "Z. B. Küchensensor, wenn der Hauptsensor zeitweise direkte Sonne abbekommt."
+          "temp_sensor_2": "Z. B. Küchensensor, wenn der Hauptsensor zeitweise direkte Sonne abbekommt.",
+          "sofi_temp": "Leer lassen = Raum bleibt wie immer. Gilt, solange der Schalter „Sofi da“ an ist – auch bei Abwesend/Urlaub."
         }
       },
       "more": {
@@ -83,18 +85,20 @@
         "data": {
           "name": "Name", "temp_sensor": "Raumtemperatursensor", "temp_sensor_2": "Zweiter Sensor (optional)",
           "trvs": "Thermostatköpfe", "windows": "Fenster-/Türkontakte (optional)", "comfort_temp": "Komforttemperatur",
-          "eco_delta": "Absenkung", "away_temp": "Abwesend/Urlaub", "schedule": "Komfortzeiten",
-          "radiator_kw": "Heizkörper-Nennleistung (Startwert)", "area_m2": "Fläche (Startwert)"
-        }
+          "eco_delta": "Absenkung", "away_temp": "Abwesend/Urlaub", "sofi_temp": "Wenn Sofi da ist (optional)",
+          "schedule": "Komfortzeiten", "radiator_kw": "Heizkörper-Nennleistung (Startwert)", "area_m2": "Fläche (Startwert)"
+        },
+        "data_description": {"sofi_temp": "Leer lassen = Raum bleibt wie immer. Gilt, solange der Schalter „Sofi da“ an ist – auch bei Abwesend/Urlaub."}
       },
       "zone_form": {
         "title": "Zone bearbeiten",
         "data": {
           "name": "Name", "temp_sensor": "Raumtemperatursensor", "temp_sensor_2": "Zweiter Sensor (optional)",
           "trvs": "Thermostatköpfe", "windows": "Fenster-/Türkontakte (optional)", "comfort_temp": "Komforttemperatur",
-          "eco_delta": "Absenkung", "away_temp": "Abwesend/Urlaub", "schedule": "Komfortzeiten",
-          "radiator_kw": "Heizkörper-Nennleistung (Startwert)", "area_m2": "Fläche (Startwert)"
-        }
+          "eco_delta": "Absenkung", "away_temp": "Abwesend/Urlaub", "sofi_temp": "Wenn Sofi da ist (optional)",
+          "schedule": "Komfortzeiten", "radiator_kw": "Heizkörper-Nennleistung (Startwert)", "area_m2": "Fläche (Startwert)"
+        },
+        "data_description": {"sofi_temp": "Leer lassen = Raum bleibt wie immer. Gilt, solange der Schalter „Sofi da“ an ist – auch bei Abwesend/Urlaub."}
       },
       "edit_zone": {"title": "Zone bearbeiten", "data": {"zone": "Zone"}},
       "remove_zone": {"title": "Zone entfernen", "data": {"zone": "Zone"}}
@@ -104,7 +108,8 @@
     "button": {"reset_learning": {"name": "Gelerntes zurücksetzen"}},
     "switch": {
       "master": {"name": "Regelung"},
-      "active": {"name": "Aktiv regeln"}
+      "active": {"name": "Aktiv regeln"},
+      "sofi": {"name": "Sofi da"}
     },
     "select": {
       "presence": {"name": "Anwesenheit", "state": {"zuhause": "Zuhause", "abwesend": "Abwesend", "urlaub": "Urlaub"}},

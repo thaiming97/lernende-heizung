@@ -15,7 +15,7 @@ from .entity import HubEntity, ZoneEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add: AddConfigEntryEntitiesCallback) -> None:
     c = entry.runtime_data
-    add([MasterSwitch(c), *(ZoneActiveSwitch(c, z) for z in c.zones.values())])
+    add([MasterSwitch(c), SofiSwitch(c), *(ZoneActiveSwitch(c, z) for z in c.zones.values())])
 
 
 class MasterSwitch(HubEntity, SwitchEntity):
@@ -37,6 +37,28 @@ class MasterSwitch(HubEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.coordinator.master_on = False
         self.coordinator.schedule_save()
+        await self.coordinator.async_refresh()
+
+
+class SofiSwitch(HubEntity, SwitchEntity):
+    """Sofi ist da: Räume mit eingestellter Sofi-Temperatur werden wärmer (auch bei „Abwesend“/„Urlaub“)."""
+
+    _platform = "switch"
+    _attr_icon = "mdi:account-heart"
+
+    def __init__(self, coordinator: HeatingCoordinator) -> None:
+        super().__init__(coordinator, "sofi")
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.sofi_on
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.coordinator.set_sofi(True)
+        await self.coordinator.async_refresh()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.coordinator.set_sofi(False)
         await self.coordinator.async_refresh()
 
 

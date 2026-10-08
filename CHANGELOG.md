@@ -4,6 +4,15 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.6.0 – 2026-10-08
+
+- **Neu: Sofi-Modus.** Schalter „Sofi da“ (`switch.sofi_lh`). Je Zone lässt sich unter
+  „Konfigurieren“ → „Zone bearbeiten“ eine *Temperatur, wenn Sofi da ist* eintragen (leer = Raum bleibt
+  wie immer). Ist der Schalter an, gilt sie statt der Komforttemperatur (Absenkung/Eco im gleichen Abstand
+  darunter) – auch wenn die Anwesenheit auf „Abwesend“ oder „Urlaub“ steht, denn Sofi ist ja da. Schalter
+  aus → wieder die normalen Temperaturen. Eine von Hand mit +/− verstellte Temperatur dieser Räume endet
+  beim Umschalten; eine feste Temperatur („Heizen“) bleibt. Die Erklärung beginnt dann mit „Sofi da –“.
+
 ## 0.5.7 – 2026-10-08
 
 - **Lernen läuft nicht mehr weg.** Keine gelernte Kennzahl darf negativ werden. Bisher wurde ein Wert, der

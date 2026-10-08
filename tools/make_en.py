@@ -25,15 +25,18 @@ en["config"]["step"]["user"] = {"title": "Learning heating – home", "descripti
 zd = {
     "name": "Name", "temp_sensor": "Room temperature sensor", "temp_sensor_2": "Second sensor (optional)",
     "trvs": "Thermostatic heads", "windows": "Window/door contacts (optional)", "comfort_temp": "Comfort temperature",
-    "eco_delta": "Setback", "away_temp": "Away/vacation temperature", "schedule": "Comfort times",
+    "eco_delta": "Setback", "away_temp": "Away/vacation temperature",
+    "sofi_temp": "Temperature when Sofi is here (optional)", "schedule": "Comfort times",
     "radiator_kw": "Radiator nominal power (initial value)", "area_m2": "Zone area (initial value)",
 }
+SOFI_DESC = "Leave empty = room stays as usual. Applies while the switch \"Sofi is here\" is on – also when away/on vacation."
 en["config"]["step"]["zone"] = {
     "title": "Zone", "description": "A zone = rooms controlled together; its radiators open equally.", "data": zd,
     "data_description": {
         "schedule": "e.g. Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30 or immer",
         "radiator_kw": "A rough value is fine; the model learns the real one.",
         "temp_sensor_2": "Replaces the main sensor while it gets direct sun.",
+        "sofi_temp": SOFI_DESC,
     },
 }
 en["config"]["step"]["more"] = {"title": "Another zone?", "menu_options": {"zone": "Add another zone", "finish": "Finish"}}
@@ -43,12 +46,12 @@ o["init"] = {"title": "Settings", "menu_options": {"general": "Home (weather, ou
 o["general"] = {"title": "Home", "data": gen}
 o["supply"] = {"title": "Supply sensor (optional)", "description": "Pipe sensor on a supply pipe (at a radiator or at the start of a branch); only valid while water flows – choose the zone whose valve sends water through this pipe.",
                "data": {"supply_sensor": "Pipe sensor", "supply_zone": "Water flows when this zone heats"}}
-o["add_zone"] = {"title": "Add zone", "data": zd}
-o["zone_form"] = {"title": "Edit zone", "data": zd}
+o["add_zone"] = {"title": "Add zone", "data": zd, "data_description": {"sofi_temp": SOFI_DESC}}
+o["zone_form"] = {"title": "Edit zone", "data": zd, "data_description": {"sofi_temp": SOFI_DESC}}
 o["edit_zone"] = {"title": "Edit zone", "data": {"zone": "Zone"}}
 o["remove_zone"] = {"title": "Remove zone", "data": {"zone": "Zone"}}
 names = {
-    "master": "Control", "active": "Actively control", "presence": "Presence", "return_at": "Return from vacation",
+    "master": "Control", "active": "Actively control", "sofi": "Sofi is here", "presence": "Presence", "return_at": "Return from vacation",
     "window": "Window open", "preheat": "Preheating", "outdoor": "Outdoor temperature", "supply": "Supply temperature",
     "sun": "Solar irradiance", "valve": "Valve", "power": "Heating power", "energy": "Heating energy", "demand": "Heat demand",
     "forecast_1h": "Temperature in 1 h", "forecast_3h": "Temperature in 3 h", "preheat_start": "Next preheat start",

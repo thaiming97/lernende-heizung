@@ -30,6 +30,7 @@ from .const import (
     CONF_OUTDOOR,
     CONF_RAD_KW,
     CONF_SCHEDULE,
+    CONF_SOFI,
     CONF_SUN,
     CONF_SUPPLY,
     CONF_SUPPLY_ZONE,
@@ -199,8 +200,18 @@ class Zone:
         return float(self.cfg.get(CONF_COMFORT, DEFAULT_COMFORT))
 
     @property
+    def eco_delta(self) -> float:
+        return float(self.cfg.get(CONF_ECO_DELTA, DEFAULT_ECO_DELTA))
+
+    @property
     def eco(self) -> float:
-        return self.comfort - float(self.cfg.get(CONF_ECO_DELTA, DEFAULT_ECO_DELTA))
+        return self.comfort - self.eco_delta
+
+    @property
+    def sofi_temp(self) -> float | None:
+        """Komforttemperatur, wenn Sofi da ist (None = Raum bleibt wie immer)."""
+        v = self.cfg.get(CONF_SOFI)
+        return None if v is None else float(v)
 
     @property
     def away(self) -> float:
@@ -215,6 +226,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.entry = entry
         self.store: Store = Store(hass, STORE_VERSION, f"{DOMAIN}.{entry.entry_id}")
         self.master_on = True
+        self.sofi_on = False  # Sofi-Modus: gewählte Räume wärmer (eigene Temperatur je Zone)
         self.presence = PRESENCE_HOME
         self.season = SEASON_AUTO
         self.heating_season = True  # Ergebnis aus Heizsaison-Auswahl bzw. Heizgrenze
@@ -323,6 +335,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _export(self) -> dict:
         return {
             "master_on": self.master_on,
+            "sofi_on": self.sofi_on,
             "presence": self.presence,
             "season": self.season,
             "heating_season": self.heating_season,
@@ -345,6 +358,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _restore(self, raw: dict) -> None:
         self.master_on = bool(raw.get("master_on", True))
+        self.sofi_on = bool(raw.get("sofi_on", False))
         if raw.get("presence") in (PRESENCE_HOME, PRESENCE_AWAY, PRESENCE_VACATION):
             self.presence = raw["presence"]
         if raw.get("season") in SEASON_OPTIONS:
@@ -386,22 +400,44 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # oder Abwesenheit (vorher wurde sie dort stillschweigend ignoriert)
         if self.override_active(z, ts):
             return Target(z.override, True)
-        if self.presence == PRESENCE_AWAY:
+        # Sofi da: ihre Räume bleiben warm, auch wenn „Abwesend“/„Urlaub“ eingestellt ist
+        sofi = self.sofi_active(z)
+        if self.presence == PRESENCE_AWAY and not sofi:
             return Target(z.away, False)
         # Urlaub: Abwesenheitstemperatur bis zur Rückkehr (ohne Rückkehrzeit unbegrenzt); danach
         # gilt wieder der Zeitplan – der Regler sieht das im 12-h-Plan und heizt rechtzeitig vor
-        if self.presence == PRESENCE_VACATION and (self.return_at is None or ts < self.return_at.timestamp()):
+        if (self.presence == PRESENCE_VACATION and not sofi
+                and (self.return_at is None or ts < self.return_at.timestamp())):
             return Target(z.away, False)
         if z.manual is not None:
             return Target(z.manual, True)
+        comfort = self.comfort_of(z)
+        eco = comfort - z.eco_delta
         if z.preset == PRESET_COMFORT:
-            return Target(z.comfort, True)
+            return Target(comfort, True)
         if z.preset == PRESET_ECO:
-            return Target(z.eco, False)
+            return Target(eco, False)
         if z.preset == PRESET_AWAY:
             return Target(z.away, False)
         local = dt_util.as_local(dt_util.utc_from_timestamp(ts))
-        return Target(z.comfort, True) if z.schedule.is_comfort(local) else Target(z.eco, False)
+        return Target(comfort, True) if z.schedule.is_comfort(local) else Target(eco, False)
+
+    def sofi_active(self, z: Zone) -> bool:
+        return self.sofi_on and z.sofi_temp is not None
+
+    def comfort_of(self, z: Zone) -> float:
+        """Komforttemperatur jetzt – mit Sofi-Modus die Sofi-Temperatur der Zone."""
+        return z.sofi_temp if self.sofi_active(z) and z.sofi_temp is not None else z.comfort
+
+    def set_sofi(self, on: bool) -> None:
+        """Sofi-Modus an/aus. Neue Situation: von Hand verstellte Temperaturen ihrer Räume enden (wie beim
+        Anwesenheitswechsel), alle Zonen planen sofort neu."""
+        self.sofi_on = on
+        for z in self.zones.values():
+            if z.sofi_temp is not None:
+                z.override = None
+            z.controller.last_plan_ts = None
+        self.schedule_save()
 
     def set_override(self, z: Zone, temp: float) -> None:
         """Sollwertänderung im Zeitplanbetrieb – bis zum nächsten Zeitplanwechsel. Gibt es keinen
@@ -735,7 +771,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             t_out_mean24=self.t_out_mean24,
             heating_limit=float(self.opts.get(CONF_HEATING_LIMIT, DEFAULT_HEATING_LIMIT)),
             heat_missing=heat_missing, master_on=self.master_on, hvac_off=z.hvac_off,
-            learning_paused=paused, window_wait_until=self._window_wait_until(z, now_ts),
+            learning_paused=paused, window_wait_until=self._window_wait_until(z, now_ts), sofi=self.sofi_active(z),
         )
         z.explanation = explain(sit)
         p = z.controller.params
@@ -793,7 +829,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if z.controlled:
                 for t in z.trvs:
                     try:
-                        await t.release(z.comfort)
+                        await t.release(self.comfort_of(z))
                     except Exception as err:  # noqa: BLE001
                         _LOGGER.warning("%s: TRV %s freigeben fehlgeschlagen: %s", z.name, t.climate_id, err)
                 z.controlled = False
@@ -840,7 +876,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         def calc() -> float | None:
             c = copy.deepcopy(z.controller)
             c.u_prev = None
-            comfort = c.make_plan(now_ts, x, lambda ts: Target(z.comfort, True), self.t_out_at(now_ts), self.sun_at(now_ts))
+            comfort = c.make_plan(now_ts, x, lambda ts: Target(self.comfort_of(z), True), self.t_out_at(now_ts), self.sun_at(now_ts))
             plan = z.decision.plan
             e_c = float(sum(comfort.u))
             e_s = float(sum(plan.u))

@@ -17,6 +17,7 @@ OBJECT_IDS = {
     "status": "status", "saving": "einsparung", "learning": "lernfortschritt", "model_error": "modellfehler",
     "time_constant": "zeitkonstante", "heat_gain": "heizwirkung", "heat_loss": "waermeverlust", "disturbance": "stoerwaerme",
     "base_gain": "grundwaerme", "explain": "erklaerung", "problem": "problem", "reset_learning": "lernen_zuruecksetzen",
+    "sofi": "sofi",
 }
 
 

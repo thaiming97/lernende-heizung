@@ -21,6 +21,7 @@ from custom_components.lernende_heizung.const import (
     CONF_RAD_KW,
     CONF_OUTDOOR,
     CONF_SCHEDULE,
+    CONF_SOFI,
     CONF_SUPPLY,
     CONF_SUPPLY_ZONE,
     CONF_TEMP,
@@ -360,6 +361,91 @@ async def test_temperature_change_lasts_without_schedule_change(hass: HomeAssist
     await hass.services.async_call("climate", "set_preset_mode", {"entity_id": cid, "preset_mode": "none"}, blocking=True)
     await hass.async_block_till_done()
     assert hass.states.get(cid).attributes["temperature"] == 23.5
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+SCHLAFEN = {
+    CONF_ZONE_ID: "schlafen", CONF_ZONE_NAME: "Schlafen", CONF_TEMP: "sensor.schlafen_temp", CONF_TRVS: ["climate.schlafzimmer"],
+    CONF_WINDOWS: [], CONF_COMFORT: 21.0, CONF_ECO_DELTA: 2.0, CONF_AWAY: 17.0, CONF_SCHEDULE: "immer",
+    CONF_RAD_KW: 1.35, CONF_AREA: 18.5,
+}
+
+
+async def _setup_sofi(hass: HomeAssistant) -> MockConfigEntry:
+    """Bad mit Sofi-Temperatur 25 °C, Schlafen ohne (bleibt wie immer)."""
+    _trv(hass, "bad")
+    _trv(hass, "schlafzimmer")
+    for eid in ("sensor.bad_temp", "sensor.schlafen_temp"):
+        hass.states.async_set(eid, "20.0", {"unit_of_measurement": "°C", "device_class": "temperature"})
+    hass.states.async_set("binary_sensor.fenster_bad", "off")
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={CONF_ZONES: [{**ZONE, CONF_SOFI: 25.0}, SCHLAFEN]})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
+async def test_sofi_mode(hass: HomeAssistant) -> None:
+    """Sofi-Modus an: gewählte Räume auf ihre Sofi-Temperatur (Absenkung im gleichen Abstand), andere bleiben.
+    Sofi gewinnt über Abwesend/Urlaub (sie ist ja da); „Heizen“ (feste Temperatur) bleibt. Aus → wie vorher."""
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup_sofi(hass)
+    bad, schlafen = "climate.bad_lh", "climate.schlafen_lh"
+    sofi = {"entity_id": "switch.sofi_lh"}
+
+    def soll(eid: str) -> float:
+        return hass.states.get(eid).attributes["temperature"]
+
+    async def call(domain: str, service: str, data: dict) -> None:
+        await hass.services.async_call(domain, service, data, blocking=True)
+        await hass.async_block_till_done()
+
+    assert (soll(bad), soll(schlafen)) == (23.5, 21.0)
+    await call("switch", "turn_on", sofi)
+    assert hass.states.get("switch.sofi_lh").state == "on"
+    assert (soll(bad), soll(schlafen)) == (25.0, 21.0)
+    assert hass.states.get(bad).attributes["sofi"] is True and "sofi" not in hass.states.get(schlafen).attributes
+    assert "Sofi" in hass.states.get("sensor.bad_erklaerung_lh").state
+    await call("climate", "set_preset_mode", {"entity_id": bad, "preset_mode": "eco"})
+    assert soll(bad) == 23.0
+    await call("climate", "set_preset_mode", {"entity_id": bad, "preset_mode": "none"})
+    # Abwesend: Sofi-Räume bleiben warm, die anderen senken ab
+    await call("select", "select_option", {"entity_id": "select.anwesenheit_lh", "option": "abwesend"})
+    assert (soll(bad), soll(schlafen)) == (25.0, 17.0)
+    await call("switch", "turn_off", sofi)
+    assert (soll(bad), soll(schlafen)) == (17.0, 17.0)
+    await call("select", "select_option", {"entity_id": "select.anwesenheit_lh", "option": "zuhause"})
+    # von Hand verstellte Temperatur endet mit dem Umschalten (neue Situation), „Heizen“ bleibt
+    await call("climate", "set_temperature", {"entity_id": bad, "temperature": 24.0})
+    await call("switch", "turn_on", sofi)
+    assert soll(bad) == 25.0
+    await call("climate", "set_hvac_mode", {"entity_id": bad, "hvac_mode": "heat"})
+    await call("climate", "set_temperature", {"entity_id": bad, "temperature": 20.0})
+    await call("switch", "turn_off", sofi)
+    await call("switch", "turn_on", sofi)
+    assert soll(bad) == 20.0
+    # übersteht einen Neustart
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.sofi_lh").state == "on"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_sofi_temperature_in_zone_settings(hass: HomeAssistant) -> None:
+    """Sofi-Temperatur wird je Zone unter „Zone bearbeiten“ eingestellt; leer = Raum bleibt wie immer."""
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {"next_step_id": "edit_zone"})
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {"zone": "bad"})
+    assert CONF_SOFI in r["data_schema"].schema
+    form = {k: v for k, v in ZONE.items() if k != CONF_ZONE_ID}
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {**form, CONF_SOFI: 24.5})
+    assert r["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert entry.options[CONF_ZONES][0][CONF_SOFI] == 24.5
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 

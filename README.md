@@ -47,7 +47,15 @@ Releases auf GitHub (HACS zeigt die Notizen beim Update an).
 Komfortzeiten als Text, z. B. `Mo-Fr 05:00-05:30, 15:30-22:30; Sa-So 08:00-22:30`
 oder `immer` (Tage auch ausgeschrieben oder englisch, z. B. `Tue-Thu`). Außerhalb gilt die
 Absenkung. Eine von Hand verstellte Temperatur gilt bis zum nächsten Wechsel im Zeitplan
-(auch bei Preset oder „Abwesend“); ein Wechsel der Anwesenheit hebt sie auf.
+(auch bei Preset oder „Abwesend“); ein Wechsel der Anwesenheit hebt sie auf. Gibt es keinen
+Wechsel (`immer`), bleibt sie, bis Preset, Modus oder Anwesenheit geändert werden.
+
+## Besuch, der es wärmer mag („Sofi da“)
+
+Je Zone unter „Konfigurieren“ → Zone bearbeiten eine *Temperatur, wenn Sofi da ist* eintragen
+(leer = Raum bleibt wie immer). Mit dem Schalter „Sofi da“ gilt sie statt der Komforttemperatur
+(Absenkung im gleichen Abstand) – auch wenn die Anwesenheit auf „Abwesend“ oder „Urlaub“ steht.
+Schalter aus → wieder die normalen Temperaturen. Feste Temperatur („Heizen“) bleibt unberührt.
 
 ## Sommer / Winter
 

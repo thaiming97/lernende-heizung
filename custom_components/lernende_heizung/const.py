@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.5.7"
+VERSION: Final = "0.6.0"
 
 PLATFORMS: Final = ["binary_sensor", "button", "climate", "datetime", "select", "sensor", "switch"]
 
@@ -30,6 +30,7 @@ CONF_COMFORT: Final = "comfort_temp"
 CONF_ECO_DELTA: Final = "eco_delta"
 CONF_AWAY: Final = "away_temp"
 CONF_SCHEDULE: Final = "schedule"
+CONF_SOFI: Final = "sofi_temp"  # Komforttemperatur, wenn Sofi da ist (leer = Raum bleibt wie immer)
 CONF_RAD_KW: Final = "radiator_kw"
 CONF_AREA: Final = "area_m2"
 

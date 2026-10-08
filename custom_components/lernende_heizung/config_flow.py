@@ -25,6 +25,7 @@ from .const import (
     CONF_OUTDOOR,
     CONF_RAD_KW,
     CONF_SCHEDULE,
+    CONF_SOFI,
     CONF_SUN,
     CONF_SUPPLY,
     CONF_SUPPLY_ZONE,
@@ -111,6 +112,9 @@ def _zone_schema(d: dict) -> vol.Schema:
     ):
         k, s = num(key, default, lo, hi, step, unit)
         fields[k] = s
+    fields[opt(CONF_SOFI)] = selector.NumberSelector(
+        selector.NumberSelectorConfig(min=15, max=28, step=0.5, unit_of_measurement="°C", mode=selector.NumberSelectorMode.BOX)
+    )
     fields[vol.Required(CONF_SCHEDULE, default=d.get(CONF_SCHEDULE, DEFAULT_SCHEDULE))] = selector.TextSelector()
     for key, default, lo, hi, step, unit in (
         (CONF_RAD_KW, DEFAULT_RAD_KW, 0.2, 10, 0.05, "kW"),

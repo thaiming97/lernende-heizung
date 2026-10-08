@@ -32,6 +32,7 @@
           "comfort_temp": "Comfort temperature",
           "eco_delta": "Setback",
           "away_temp": "Away/vacation temperature",
+          "sofi_temp": "Temperature when Sofi is here (optional)",
           "schedule": "Comfort times",
           "radiator_kw": "Radiator nominal power (initial value)",
           "area_m2": "Zone area (initial value)"
@@ -39,7 +40,8 @@
         "data_description": {
           "schedule": "e.g. Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30 or immer",
           "radiator_kw": "A rough value is fine; the model learns the real one.",
-          "temp_sensor_2": "Replaces the main sensor while it gets direct sun."
+          "temp_sensor_2": "Replaces the main sensor while it gets direct sun.",
+          "sofi_temp": "Leave empty = room stays as usual. Applies while the switch \"Sofi is here\" is on – also when away/on vacation."
         }
       },
       "more": {
@@ -97,9 +99,13 @@
           "comfort_temp": "Comfort temperature",
           "eco_delta": "Setback",
           "away_temp": "Away/vacation temperature",
+          "sofi_temp": "Temperature when Sofi is here (optional)",
           "schedule": "Comfort times",
           "radiator_kw": "Radiator nominal power (initial value)",
           "area_m2": "Zone area (initial value)"
+        },
+        "data_description": {
+          "sofi_temp": "Leave empty = room stays as usual. Applies while the switch \"Sofi is here\" is on – also when away/on vacation."
         }
       },
       "zone_form": {
@@ -113,9 +119,13 @@
           "comfort_temp": "Comfort temperature",
           "eco_delta": "Setback",
           "away_temp": "Away/vacation temperature",
+          "sofi_temp": "Temperature when Sofi is here (optional)",
           "schedule": "Comfort times",
           "radiator_kw": "Radiator nominal power (initial value)",
           "area_m2": "Zone area (initial value)"
+        },
+        "data_description": {
+          "sofi_temp": "Leave empty = room stays as usual. Applies while the switch \"Sofi is here\" is on – also when away/on vacation."
         }
       },
       "edit_zone": {
@@ -144,6 +154,9 @@
       },
       "active": {
         "name": "Actively control"
+      },
+      "sofi": {
+        "name": "Sofi is here"
       }
     },
     "select": {

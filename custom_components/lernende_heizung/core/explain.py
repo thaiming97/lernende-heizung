@@ -34,6 +34,7 @@ class Situation:
     hvac_off: bool = False
     learning_paused: str | None = None
     window_wait_until: float | None = None  # Fenster wieder zu, Ventil bleibt bis dahin zu
+    sofi: bool = False  # Sofi-Modus gilt für diese Zone
 
 
 def _n(x: float, d: int = 1) -> str:
@@ -107,4 +108,6 @@ def explain(s: Situation) -> str:
             parts.append(f"Lernen pausiert: {s.learning_paused}.")
 
     text = " ".join(parts)
+    if s.sofi and r in ("komfort", "absenkung", "vorheizen", "beobachten", "rueckfall"):
+        text = "Sofi da – " + text
     return text if len(text) <= MAX_LEN else text[: MAX_LEN - 1] + "…"

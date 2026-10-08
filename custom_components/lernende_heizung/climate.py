@@ -74,6 +74,8 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
         z = self.zone
         d = z.decision
         attrs: dict[str, Any] = {"grund": d.reason if d else None, "ventil": z.valve_pct, "aktiv": z.active}
+        if self.coordinator.sofi_active(z):
+            attrs["sofi"] = True
         if self.coordinator.override_active(z, time.time()):
             attrs["uebersteuert_bis"] = (
                 time.strftime("%H:%M", time.localtime(z.override_until)) if z.override_until else "Preset-/Moduswechsel"
