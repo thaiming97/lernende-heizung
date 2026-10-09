@@ -261,6 +261,34 @@ def test_rls_bounds_do_not_drive_other_parameters_away():
     assert all(0.0 <= t <= u for t, u in zip(r.theta, r.upper))
 
 
+def test_model_error_not_dominated_by_first_sample():
+    """Großer Fehler in der ersten Stichprobe (Heizung geht an) darf nicht tagelang den Modellfehler bestimmen –
+    vorher stand das Bad nach 200 Stichproben noch bei 0,6 K/h > Notbetriebsgrenze 0,5, obwohl es passte."""
+    from custom_components.lernende_heizung.const import FALLBACK_MIN_SAMPLES, FALLBACK_RMSE
+    from custom_components.lernende_heizung.core.learning import Candidate, Rls
+
+    c = Candidate(0.02, 0.5, Rls.from_prior([0.05] * 10))
+    c.add_error(0.78)
+    assert math.isclose(c.score, 0.78 ** 2)  # erste Stichprobe: genau ihr Fehler
+    c.add_error(0.0)
+    assert math.isclose(c.score, 0.78 ** 2 / 2, rel_tol=0.01)  # dann Mittelwert, nicht 99,7 % Altwert
+    for _ in range(FALLBACK_MIN_SAMPLES - 2):
+        c.add_error(0.17)
+    assert math.sqrt(c.score) < 0.25 < FALLBACK_RMSE
+    # Stand von 0.6.0 (live 09.10.: Bad 0,752 K/h nach 40 Stichproben, ohne Gewichtssumme) wird abgelöst
+    L = ZoneLearner(ZoneParams())
+    raw = L.export()
+    for rc in raw["cands"]:
+        rc.pop("w")
+        rc["score"], rc["n"] = 0.752 ** 2, 40
+    raw["samples"] = 40
+    L.restore(raw)
+    for cand in L.cands:
+        for _ in range(FALLBACK_MIN_SAMPLES - 40):
+            cand.add_error(0.17)
+    assert L.rmse() < 0.4
+
+
 def test_learner_tracks_room_while_paused():
     """Während einer Lernpause (z. B. Fenster offen) laufen Speichermasse und Heizkörper mit der
     gemessenen Raumtemperatur weiter – vorher mit dem letzten Wert vor der Pause."""
@@ -514,6 +542,35 @@ def test_supply_restore_drops_hour_offsets_of_old_version():
     sl2 = SupplyLearner()
     sl2.restore(new.export())
     assert sl2.hour_off[3] == -6.0 and sl2.hour_n[3] == 7
+
+
+def _first_heating_evening(sl: SupplyLearner) -> float:
+    """Wie am 08.10.: ab 17 Uhr Ventil offen, außen 13 → 5 °C, Rohr ~29,5 °C, 22–04 Uhr Nachtabsenkung."""
+    ts = 17 * 3600.0
+    for k in range(12 * 12):  # 12 h, alle 5 min
+        hour = int(ts // 3600) % 24
+        tout = 13.0 - 8.0 * k / 144
+        pipe = 29.5 - (4.0 if hour >= 22 or hour < 4 else 0.0)
+        sl.update(ts, pipe, tout, 1.0, t_room=21.5, hour=hour)
+        ts += 300
+    return ts
+
+
+def test_supply_curve_slope_stays_physical():
+    """Ein Abend mit fallender Außentemperatur und Nachtabsenkung darf keine steigende Heizkurve ergeben
+    (live 08.10.: b = +0,43 → bei −10 °C nur 25 °C Vorlauf, Heizwirkung darauf ×4,7 umgerechnet)."""
+    sl = SupplyLearner()
+    _first_heating_evening(sl)
+    m10, p15, _offs = sl.curve_params()
+    assert sl.B_MIN <= sl.b <= 0.0
+    assert m10 >= p15
+    assert abs(sl.supply(9.0) - 31.0) < 1.5  # Niveau dort, wo gemessen wurde, stimmt weiter
+    # gespeicherter Stand einer älteren Version mit steigender Geraden wird beim Laden korrigiert
+    raw = sl.export()
+    raw["b"], raw["a"] = 0.43, 26.6
+    sl2 = SupplyLearner()
+    sl2.restore(raw)
+    assert sl2.b <= 0.0 and math.isclose(sl2.b, sl.b) and math.isclose(sl2.a, sl.a)
 
 
 def test_supply_learner_needs_room_temperature():

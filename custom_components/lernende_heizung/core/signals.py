@@ -214,6 +214,9 @@ class SupplyLearner:
     OPEN_MIN = 0.08  # ab dieser Ventilöffnung zählt der Rohrfühler als Vorlauf
     COLD_OPEN_MIN = 0.3  # „Kessel kalt“ nur bei weit offenem Ventil
     HOUR_MIN_N = 5
+    B_PRIOR = -0.8  # Startwert Steigung: K Vorlauf je K Außentemperatur (55 °C bei −10, 35 °C bei +15)
+    B_PRIOR_W = 60.0  # so viele Messungen bei ±4 K Spreizung wiegt der Startwert der Steigung
+    B_MIN, B_MAX = -2.0, 0.0
 
     def measured(self, ts: float, max_age_s: float = 900.0) -> float | None:
         """Gemessener Vorlauf, wenn er aktuell ist (sonst None → Heizkurve verwenden)."""
@@ -293,13 +296,7 @@ class SupplyLearner:
         self._sxx = lam * self._sxx + t_out * t_out
         self._sxy = lam * self._sxy + t_out * y
         self.n += 1
-        den = self._w * self._sxx - self._sx ** 2
-        if self.n >= 30 and den > 1e-6 * self._w ** 2 and den / self._w ** 2 > 4.0:  # Tout-Spreizung > 2 K
-            self.b = (self._w * self._sxy - self._sx * self._sy) / den
-            self.a = (self._sy - self.b * self._sx) / self._w
-        elif self.n >= 10:
-            # nur Niveau anpassen
-            self.a = self._sy / self._w - self.b * self._sx / self._w
+        self._fit()
         # Versatz je Tagesstunde erst, wenn das Niveau gemessen ist – vorher wäre die Abweichung von der
         # angenommenen Kurve fälschlich eine „Absenkung“ genau der Stunden, in denen zuerst gemessen wurde
         if hour is not None and self.n >= 10:
@@ -308,6 +305,21 @@ class SupplyLearner:
             a = max(0.05, 1.0 / (c + 1))
             self.hour_off[h] += a * ((y - (self.a + self.b * t_out)) - self.hour_off[h])
             self.hour_n[h] = c + 1
+
+    def _fit(self) -> None:
+        """Gerade Tvl = a + b·Tout. Die Steigung wird zum Startwert hingezogen (wie B_PRIOR_W Messungen bei
+        ±4 K Spreizung) und muss ≤ 0 sein: Ein witterungsgeführter Kessel fährt bei Kälte nicht kälter.
+        Vorher reichten 2 K Spreizung – am ersten Heizabend (08.10.: 13 → 5 °C außen, ab 22 Uhr Nachtabsenkung)
+        kam b = +0,43 heraus, also bei −10 °C nur 25 °C Vorlauf; die Heizwirkung wurde darauf ×4,7 umgerechnet."""
+        if self.n < 10 or self._w <= 0:
+            return  # Startwerte, bis das Niveau gemessen ist
+        mx, my = self._sx / self._w, self._sy / self._w
+        sxx = max(0.0, self._sxx - self._sx * mx)  # Streuung um den Mittelwert
+        sxy = self._sxy - self._sx * my
+        k = self.B_PRIOR_W * 16.0
+        b = (sxy + k * self.B_PRIOR) / (sxx + k)
+        self.b = min(self.B_MAX, max(self.B_MIN, b))
+        self.a = my - self.b * mx
 
     def supply(self, t_out: float) -> float:
         return min(75.0, max(25.0, self.a + self.b * t_out))
@@ -332,6 +344,7 @@ class SupplyLearner:
                     setattr(self, k, [float(x) if k == "hour_off" else int(x) for x in v])
             elif hasattr(self, k) and isinstance(v, (int, float)) and math.isfinite(v):
                 setattr(self, k, type(getattr(self, k))(v))
+        self._fit()  # gespeicherte Gerade kann aus einer älteren Version stammen (z. B. steigend)
 
 
 def utc_hour(ts: float) -> int:

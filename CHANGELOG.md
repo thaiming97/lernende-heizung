@@ -4,6 +4,22 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.6.1 – 2026-10-09
+
+Zwei Fehler aus dem ersten Heiztag:
+
+- **Modellfehler hing tagelang am ersten Messwert.** Der gleitende Fehler zählte die allererste Stichprobe
+  voll und ließ sie erst über Tage abklingen. Beim Einschalten der Heizung ist genau die oft daneben
+  (Bad: 0,75 K/h, obwohl die Vorhersagen danach gut passten). Ab 200 Stichproben (Samstag) hätte das
+  Bad deshalb grundlos in den Notbetrieb (einfacher PI-Regler) gewechselt. Jetzt ist es ein echtes
+  Mittel über die letzten Tage; der alte Wert wird nach dem Update in ein bis zwei Tagen abgelöst.
+- **Heizkurve konnte falsch herum gelernt werden.** Am ersten Abend fiel die Außentemperatur von 13 auf
+  5 °C, und ab 22 Uhr senkte der Kessel nachts ab. Daraus wurde „je kälter, desto kälter der Vorlauf“
+  (bei −10 °C nur 25 °C). Jetzt darf die Kurve bei Kälte nicht fallen, und die Steigung bleibt beim
+  Startwert, bis Messungen bei deutlich verschiedenen Außentemperaturen vorliegen. Nach dem Update wird
+  die Kurve aus den bisherigen Messungen sofort neu berechnet (bei dir etwa 34 °C bei −10 °C, 32 °C bei
+  0 °C, 30 °C bei +10 °C).
+
 ## 0.6.0 – 2026-10-08
 
 - **Neu: Sofi-Modus.** Schalter „Sofi da“ (`switch.sofi_lh`). Je Zone lässt sich unter

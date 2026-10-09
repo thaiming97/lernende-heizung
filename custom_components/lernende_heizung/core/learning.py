@@ -29,6 +29,7 @@ from .model import (
 
 LIN = ("k_am", "k_n", "k_o", "g_e", "g_s", "g_w", "h0", "h1", "h2", "g0")
 SAMPLE_H = 0.25
+SCORE_DECAY = 0.997  # gleitender mittlerer Fehler über ~330 Stichproben (~3,5 Tage)
 
 
 def _theta(p: ZoneParams) -> list[float]:
@@ -136,6 +137,15 @@ class Candidate:
     state: ZoneState | None = None
     score: float = 0.0
     n: int = 0
+    w: float = 0.0  # Summe der Gewichte im gleitenden Mittel (→ 1); score = gewichtetes Mittel, nicht verzerrt
+
+    def add_error(self, e: float) -> None:
+        """Mittlerer quadratischer Fehler, gleitend und auf die Gewichtssumme normiert. Vorher zählte die erste
+        Stichprobe mit vollem Gewicht und klang erst über Tage ab: Ein großer Fehler beim Einschalten der Heizung
+        (Bad 08.10.: 0,78 K/h) hätte nach 200 Stichproben den Notbetrieb ausgelöst, obwohl das Modell längst passte."""
+        self.w = SCORE_DECAY * self.w + (1 - SCORE_DECAY)
+        self.score += (1 - SCORE_DECAY) / self.w * (e * e - self.score)
+        self.n += 1
 
 
 @dataclass
@@ -238,9 +248,7 @@ class ZoneLearner:
             if s is None:
                 continue
             x = [s.tm - m["t"], m["tn"] - m["t"], m["to"] - m["t"], m["se"], m["ss"], m["sw"], *s.q, 1.0]
-            e = c.rls.update(x, rate, r)
-            c.n += 1
-            c.score = 0.997 * c.score + 0.003 * e * e if c.n > 1 else e * e
+            c.add_error(c.rls.update(x, rate, r))
         best = min(range(len(self.cands)), key=lambda i: self.cands[i].score)
         if self.cands[best].score < 0.95 * self.cands[self.best].score:
             self.best = best
@@ -297,7 +305,7 @@ class ZoneLearner:
             "best": self.best, "samples": self.samples, "heat_samples": self.heat_samples,
             "resid_var": self.resid_var, "last_ts": self.last_ts, "curve_ref": list(self.curve_ref),
             "cands": [{"k_ma": c.k_ma, "valve_exp": c.valve_exp, "theta": c.rls.theta, "P": c.rls.P,
-                       "score": c.score, "n": c.n,
+                       "score": c.score, "n": c.n, "w": c.w,
                        "state": None if c.state is None else {"t": c.state.t, "tm": c.state.tm, "q": list(c.state.q)}}
                       for c in self.cands],
         }
@@ -320,9 +328,15 @@ class ZoneLearner:
                     return
                 if not all(math.isfinite(v) for v in th) or not all(math.isfinite(v) for row in P for v in row):
                     return
-                loaded.append((c, th, P, float(rc["score"]), int(rc["n"]), _state_from(rc.get("state"))))
-            for c, th, P, score, cnt, st in loaded:
-                c.rls.theta, c.rls.P, c.score, c.n, c.state = th, P, score, cnt, st
+                cnt = int(rc["n"])
+                # Stand bis 0.6.0 ohne Gewichtssumme: Fehler gilt als Mittel der bisherigen Stichproben (er war
+                # von der ersten überzeichnet und wird so in wenigen Tagen von neuen Fehlern abgelöst)
+                w = float(rc["w"]) if "w" in rc else 1.0 - SCORE_DECAY ** cnt
+                if not (math.isfinite(w) and 0.0 <= w <= 1.0):
+                    return
+                loaded.append((c, th, P, float(rc["score"]), cnt, w, _state_from(rc.get("state"))))
+            for c, th, P, score, cnt, w, st in loaded:
+                c.rls.theta, c.rls.P, c.score, c.n, c.w, c.state = th, P, score, cnt, w, st
             self.best = int(raw["best"])
             self.samples = int(raw["samples"])
             self.heat_samples = int(raw["heat_samples"])
