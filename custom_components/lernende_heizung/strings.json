@@ -157,6 +157,9 @@
       },
       "sofi": {
         "name": "Sofi is here"
+      },
+      "doors": {
+        "name": "Doors open"
       }
     },
     "select": {

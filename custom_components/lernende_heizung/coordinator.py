@@ -49,6 +49,8 @@ from .const import (
     DEFAULT_HEATING_LIMIT,
     DEFAULT_SCHEDULE,
     DOMAIN,
+    DOORS_NOTICE_S,
+    DOORS_SETTLE_S,
     EXT_TEMP_REFRESH_S,
     FALLBACK_MIN_SAMPLES,
     FALLBACK_RMSE,
@@ -110,6 +112,7 @@ PAUSE_WINDOW = "Fenster war gerade offen"
 PAUSE_SEASON = "Heizperiode hat gerade erst begonnen"
 PAUSE_VALVE = "Ventilstellung war gerade unsicher"
 PAUSE_COLD_PIPE = "Rohr kalt trotz offenem Ventil – unklar, ob Wärme ankommt"
+PAUSE_DOORS = "Türen offen oder gerade erst zu"
 
 
 def _num(hass: HomeAssistant, entity_id: str | None, max_age_s: float | None = None) -> float | None:
@@ -227,6 +230,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.store: Store = Store(hass, STORE_VERSION, f"{DOMAIN}.{entry.entry_id}")
         self.master_on = True
         self.sofi_on = False  # Sofi-Modus: gewählte Räume wärmer (eigene Temperatur je Zone)
+        self.doors_open = False  # Schalter „Türen offen“ (Innentüren auf, z. B. für den Saugroboter)
+        self.doors_since: float | None = None
+        self.doors_last_ts = 0.0  # zuletzt Türen offen – danach noch DOORS_SETTLE_S Lernpause
         self.presence = PRESENCE_HOME
         self.season = SEASON_AUTO
         self.heating_season = True  # Ergebnis aus Heizsaison-Auswahl bzw. Heizgrenze
@@ -317,6 +323,20 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             cancel = async_call_later(self.hass, WINDOW_DELAY_S + 1, callback(_due))
             self._window_timers.add(cancel)
 
+    def set_doors(self, on: bool) -> None:
+        """Schalter „Türen offen“ (nur von Hand): solange an (und DOORS_SETTLE_S danach) lernt keine Zone.
+        Geregelt wird normal."""
+        if on and not self.doors_open:
+            self.doors_since = time.time()
+        self.doors_open = on
+        if not on:
+            self.doors_since = None
+        self.schedule_save()
+
+    def doors_forgotten(self, now_ts: float) -> bool:
+        """Schalter schon lange an – vergessen? (Er geht bewusst nicht von selbst aus.)"""
+        return self.doors_open and self.doors_since is not None and now_ts - self.doors_since >= DOORS_NOTICE_S
+
     def _window_is_open(self, z: Zone, now_ts: float) -> bool:
         """Fenster/Tür gilt erst als offen, wenn sie WINDOW_DELAY_S offen steht (kurz rausgehen zählt nicht)."""
         for w in z.cfg.get(CONF_WINDOWS, []):
@@ -336,6 +356,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return {
             "master_on": self.master_on,
             "sofi_on": self.sofi_on,
+            "doors_open": self.doors_open,
+            "doors_since": self.doors_since,
+            "doors_last_ts": self.doors_last_ts,
             "presence": self.presence,
             "season": self.season,
             "heating_season": self.heating_season,
@@ -359,6 +382,12 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _restore(self, raw: dict) -> None:
         self.master_on = bool(raw.get("master_on", True))
         self.sofi_on = bool(raw.get("sofi_on", False))
+        self.doors_open = bool(raw.get("doors_open", False))
+        since, last = raw.get("doors_since"), raw.get("doors_last_ts")
+        self.doors_since = float(since) if self.doors_open and isinstance(since, (int, float)) else None
+        if self.doors_open and self.doors_since is None:
+            self.doors_since = time.time()
+        self.doors_last_ts = float(last) if isinstance(last, (int, float)) else 0.0
         if raw.get("presence") in (PRESENCE_HOME, PRESENCE_AWAY, PRESENCE_VACATION):
             self.presence = raw["presence"]
         if raw.get("season") in SEASON_OPTIONS:
@@ -595,6 +624,10 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         dt_h = 0.0 if self._last_ts is None else min(1.0, (now_ts - self._last_ts) / 3600)
         self._last_ts = now_ts
 
+        doors = self.doors_open
+        if doors:
+            self.doors_last_ts = now_ts
+        doors_recent = now_ts - self.doors_last_ts < DOORS_SETTLE_S
         temps = {zid: z.temp for zid, z in self.zones.items() if z.temp is not None}
         for z in self.zones.values():
             others = [v for k, v in temps.items() if k != z.zid]
@@ -609,6 +642,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # der Zug zum Startwert würde das Gelernte über die Heizkörper langsam vergessen.
             if z.last_window_ts == now_ts:  # offen oder gerade geschlossen
                 self._block(z, now_ts + WINDOW_LEARN_PAUSE_S, PAUSE_WINDOW)
+            if doors:  # Innentüren offen: Wärme fließt zwischen den Räumen ganz anders als sonst
+                self._block(z, now_ts + DOORS_SETTLE_S, PAUSE_DOORS)
             if summer:
                 self._block(z, now_ts + CYCLE_S, PAUSE_SEASON)
             elif valve_frac is None:
@@ -624,8 +659,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 z.controller.params = z.learner.params()
                 z.params_ts = now_ts
             if z.temp is not None:
-                # Fenster offen (und kurz danach): Auskühlen nicht als Störgröße lernen
-                freeze = now_ts - z.last_window_ts < WINDOW_LEARN_PAUSE_S
+                # Fenster offen (und kurz danach) bzw. Türen offen: nicht als Störgröße lernen – die wäre
+                # nach dem Schließen falsch und klänge erst über Stunden ab
+                freeze = now_ts - z.last_window_ts < WINDOW_LEARN_PAUSE_S or doors_recent
                 z.controller.observe(now_ts, z.temp, x, effective_valve(valve_frac, z.controller.params.valve_exp), freeze_d=freeze)
             z.energy_kwh += heating_power_kw(z.controller.params, z.controller.state) * dt_h if z.controller.state else 0.0
 
@@ -817,6 +853,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             probs.append("Sicherheitsbetrieb – Modell passt gerade nicht")
         if heat_missing:
             probs.append("Kessel liefert keine Wärme (Vorlauf kalt trotz offenem Ventil)")
+        if self.doors_forgotten(now_ts):
+            probs.append("Schalter „Türen offen“ seit über 12 h an – solange lernt die Heizung nicht")
         z.problems = probs
 
     @staticmethod

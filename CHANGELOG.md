@@ -4,6 +4,15 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.7.0 – 2026-10-09
+
+- **Neu: Schalter „Türen offen“** (`switch.tueren_offen_lh`). Für Tage, an denen die Innentüren offen stehen,
+  z. B. für den Saugroboter. Dann heizen sich die Räume gegenseitig ganz anders als sonst (das warme Bad gibt
+  Wärme an Flur und Schlafzimmer ab), und die Heizung würde das als normales Verhalten der Räume lernen.
+  Solange der Schalter an ist, lernt keine Zone, und noch eine Stunde nach dem Ausschalten nicht (die Luft
+  braucht eine Weile, bis die Räume wieder für sich sind). Geheizt wird ganz normal weiter. Der Schalter
+  wird nur von Hand bedient; steht er länger als 12 Stunden an, erscheint ein Hinweis in der Problemliste.
+
 ## 0.6.1 – 2026-10-09
 
 Zwei Fehler aus dem ersten Heiztag:

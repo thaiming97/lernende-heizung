@@ -51,7 +51,7 @@ o["zone_form"] = {"title": "Edit zone", "data": zd, "data_description": {"sofi_t
 o["edit_zone"] = {"title": "Edit zone", "data": {"zone": "Zone"}}
 o["remove_zone"] = {"title": "Remove zone", "data": {"zone": "Zone"}}
 names = {
-    "master": "Control", "active": "Actively control", "sofi": "Sofi is here", "presence": "Presence", "return_at": "Return from vacation",
+    "master": "Control", "active": "Actively control", "sofi": "Sofi is here", "doors": "Doors open", "presence": "Presence", "return_at": "Return from vacation",
     "window": "Window open", "preheat": "Preheating", "outdoor": "Outdoor temperature", "supply": "Supply temperature",
     "sun": "Solar irradiance", "valve": "Valve", "power": "Heating power", "energy": "Heating energy", "demand": "Heat demand",
     "forecast_1h": "Temperature in 1 h", "forecast_3h": "Temperature in 3 h", "preheat_start": "Next preheat start",

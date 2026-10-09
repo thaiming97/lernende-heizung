@@ -109,7 +109,8 @@
     "switch": {
       "master": {"name": "Regelung"},
       "active": {"name": "Aktiv regeln"},
-      "sofi": {"name": "Sofi da"}
+      "sofi": {"name": "Sofi da"},
+      "doors": {"name": "Türen offen"}
     },
     "select": {
       "presence": {"name": "Anwesenheit", "state": {"zuhause": "Zuhause", "abwesend": "Abwesend", "urlaub": "Urlaub"}},

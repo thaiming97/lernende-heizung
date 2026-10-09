@@ -172,6 +172,51 @@ async def _tick(hass: HomeAssistant, freezer, coord, seconds: float) -> None:
     await hass.async_block_till_done()
 
 
+async def test_doors_open_pauses_learning(hass: HomeAssistant, freezer) -> None:
+    """Schalter „Türen offen“ (nur von Hand): Lernen pausiert bis 1 h nach dem Ausschalten, geregelt wird normal
+    weiter. Er geht nicht von selbst aus; nach 12 h steht ein Hinweis in der Problemliste."""
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    await _activate(hass, entry)
+    doors = {"entity_id": "switch.tueren_offen_lh"}
+
+    def pause() -> str | None:
+        return hass.states.get("sensor.bad_erklaerung_lh").attributes["lernpause"]
+
+    async def call(service: str) -> None:
+        await hass.services.async_call("switch", service, doors, blocking=True)
+        await hass.async_block_till_done()
+
+    assert hass.states.get("switch.tueren_offen_lh").state == "off" and pause() is None
+    await call("turn_on")
+    assert "Türen" in pause()
+    assert hass.states.get("sensor.bad_status_lh").state == "komfort"  # heizt weiter (kein Fenster-Betrieb)
+    assert coord.zones["bad"].valve_pct > 0
+    assert hass.states.get("switch.tueren_offen_lh").attributes["seit"]
+    await call("turn_off")
+    await _tick(hass, freezer, coord, 30 * 60)
+    assert "Türen" in pause()  # Luft braucht nach dem Schließen noch eine Weile
+    await _tick(hass, freezer, coord, 31 * 60)
+    assert "Türen" not in (pause() or "")  # (Test-TRV übernimmt Stellungen nicht → „Ventil unsicher“ ist hier normal)
+    # übersteht einen Neustart
+    await call("turn_on")
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    assert hass.states.get("switch.tueren_offen_lh").state == "on"
+    # vergessen: bleibt an, aber nach 12 h ein Hinweis
+    assert not hass.states.get("binary_sensor.bad_problem_lh").attributes["probleme"]
+    await _tick(hass, freezer, coord, 12 * 3600)
+    assert hass.states.get("switch.tueren_offen_lh").state == "on"
+    assert any("Türen offen" in p for p in hass.states.get("binary_sensor.bad_problem_lh").attributes["probleme"])
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["tueren_offen"]["schalter"] is True
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_window_counts_only_after_one_minute(hass: HomeAssistant, freezer) -> None:
     """Kurz rausgehen (Tür < 1 min offen): Ventil bleibt, Lernen läuft weiter. Erst ab 1 min gilt sie als offen."""
     calls = async_mock_service(hass, "number", "set_value")
