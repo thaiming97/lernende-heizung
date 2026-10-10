@@ -517,6 +517,47 @@ async def test_climate_modes_and_override(hass: HomeAssistant) -> None:
     assert hass.states.get(cid).attributes["temperature"] == 17.0
 
 
+async def test_hand_settings_end_at_midnight(hass: HomeAssistant, freezer) -> None:
+    """Felix: von Hand geänderte Temperatur bleibt bis 0 Uhr, dann wieder Automatik – und man sieht es."""
+    freezer.move_to(dt_util.as_utc(dt_util.now().replace(hour=19, minute=0, second=0, microsecond=0)))
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    cid = _eid(hass, entry, "climate", "bad_climate")
+    sid = "sensor.bad_status_lh"
+    await hass.services.async_call("switch", "turn_on", {"entity_id": _eid(hass, entry, "switch", "bad_active")}, blocking=True)
+    await hass.async_block_till_done()
+    auto_temp = hass.states.get(cid).attributes["temperature"]
+    assert hass.states.get(cid).attributes["manuell"] is False
+    await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 25.0}, blocking=True)
+    await hass.async_block_till_done()
+    a = hass.states.get(cid).attributes
+    assert a["temperature"] == 25.0 and a["manuell"] is True and a["manuell_bis"] == "00:00"
+    assert hass.states.get(sid).state == "manuell"
+    assert hass.states.get("sensor.bad_erklaerung_lh").state.startswith("Von Hand bis 0 Uhr")
+    freezer.tick(timedelta(hours=5, minutes=5))  # 00:05
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    a = hass.states.get(cid).attributes
+    assert a["temperature"] == auto_temp and a["manuell"] is False and "manuell_bis" not in a
+    assert hass.states.get(sid).state != "manuell" and coord.zones["bad"].override is None
+    # „Heizen“ (feste Temperatur) endet ebenfalls um Mitternacht …
+    await hass.services.async_call("climate", "set_hvac_mode", {"entity_id": cid, "hvac_mode": "heat"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).state == "heat" and hass.states.get(cid).attributes["manuell"] is True
+    freezer.tick(timedelta(hours=24))
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).state == "auto"
+    # … „Aus“ nicht
+    await hass.services.async_call("climate", "set_hvac_mode", {"entity_id": cid, "hvac_mode": "off"}, blocking=True)
+    freezer.tick(timedelta(hours=24))
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).state == "off"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_state_survives_restart(hass: HomeAssistant) -> None:
     async_mock_service(hass, "number", "set_value")
     entry = await _setup(hass)

@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import HeatingConfigEntry
 from .const import PRESET_AWAY, PRESET_COMFORT, PRESET_ECO, PRESET_SCHEDULE
-from .coordinator import HeatingCoordinator, Zone
+from .coordinator import HeatingCoordinator, Zone, _hhmm
 from .entity import ZoneEntity
 
 
@@ -56,7 +56,7 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
     def hvac_mode(self) -> HVACMode:
         if self.zone.hvac_off:
             return HVACMode.OFF
-        return HVACMode.HEAT if self.zone.manual is not None else HVACMode.AUTO
+        return HVACMode.HEAT if self.coordinator.manual_active(self.zone, time.time()) else HVACMode.AUTO
 
     @property
     def hvac_action(self) -> HVACAction:
@@ -67,7 +67,7 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
 
     @property
     def preset_mode(self) -> str:
-        return self.zone.preset
+        return self.coordinator.preset_at(self.zone, time.time())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -76,10 +76,11 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
         attrs: dict[str, Any] = {"grund": d.reason if d else None, "ventil": z.valve_pct, "aktiv": z.active}
         if self.coordinator.sofi_active(z):
             attrs["sofi"] = True
-        if self.coordinator.override_active(z, time.time()):
-            attrs["uebersteuert_bis"] = (
-                time.strftime("%H:%M", time.localtime(z.override_until)) if z.override_until else "Preset-/Moduswechsel"
-            )
+        # von Hand eingestellt (Temperatur, „Heizen“ oder Preset) – gilt bis Mitternacht
+        until = self.coordinator.hand_until(z, time.time())
+        attrs["manuell"] = until is not None
+        if until is not None:
+            attrs["manuell_bis"] = _hhmm(until)
         if d and d.plan is not None:
             attrs["vorhersage"] = [round(float(t), 2) for t in d.plan.t_pred[3::4][:12]]  # stündlich, 12 h
         return attrs
@@ -93,9 +94,11 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
         z = self.zone
         z.hvac_off = hvac_mode == HVACMode.OFF
         if hvac_mode == HVACMode.HEAT:
-            z.manual = self.coordinator.target_at(z, time.time()).setpoint if z.manual is None else z.manual
+            now = time.time()
+            temp = z.manual if self.coordinator.manual_active(z, now) else self.coordinator.target_at(z, now).setpoint
+            self.coordinator.set_manual(z, temp)
         elif hvac_mode == HVACMode.AUTO:
-            z.manual = None
+            self.coordinator.set_manual(z, None)
         z.override = None  # neue Betriebsart gilt sofort (Übersteuerung hat sonst Vorrang)
         await self._changed()
 
@@ -110,15 +113,15 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
         if temp is None:
             return
         z = self.zone
-        if z.manual is not None:
-            z.manual = float(temp)
+        if self.coordinator.manual_active(z, time.time()):
+            self.coordinator.set_manual(z, float(temp))
             z.override = None
         else:
             self.coordinator.set_override(z, float(temp))
         await self._changed()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        self.zone.preset = preset_mode
+        self.coordinator.set_preset(self.zone, preset_mode)
         self.zone.override = None
-        self.zone.manual = None  # Presets gelten nur in Automatik – „Heizen“ (feste Temperatur) endet damit
+        self.coordinator.set_manual(self.zone, None)  # Presets gelten nur in Automatik – „Heizen“ endet damit
         await self._changed()

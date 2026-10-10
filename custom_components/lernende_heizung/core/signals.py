@@ -138,9 +138,11 @@ class SunModel:
 class RoomSensorFilter:
     """Ersetzt unplausible Spitzen des Hauptsensors (z. B. direkte Sonne).
 
-    Die Anstiegsgrenze gilt nur, wenn die Sonne scheinen kann und kein Fenster gerade offen war:
+    Beide Prüfungen gelten nur, wenn die Sonne scheinen kann und kein Fenster gerade offen war:
     Nach dem Lüften (oder beim Duschen) wird die Luft ganz echt schnell wieder warm – das darf
-    nicht als Spitze festgehalten werden, sonst heizt der Regler gegen einen Phantom-Einbruch."""
+    nicht als Spitze festgehalten werden, sonst heizt der Regler gegen einen Phantom-Einbruch.
+    Ohne Sonne ist ein großer Abstand zum Zweitsensor dessen Störung (Küche beim Kochen/Lüften),
+    dann gilt der Hauptsensor, und der übliche Abstand lernt nur aus ruhigen Zeiten."""
 
     max_rise_kph: float = 1.5  # schneller kann der Raum nicht wärmer werden
     max_offset: float = 1.0  # K Abweichung zum Zweitsensor
@@ -160,8 +162,8 @@ class RoomSensorFilter:
         spike = False
         if secondary is not None:
             d = primary - secondary
-            if self.n >= 30 and d - self.offset > self.max_offset:
-                spike = True
+            if self.n >= 30 and abs(d - self.offset) > self.max_offset:
+                spike = sun and not settling and d > self.offset
             elif not settling:  # nach dem Lüften erholen sich die Räume unterschiedlich schnell
                 self.n += 1
                 a = max(0.002, 1.0 / self.n)

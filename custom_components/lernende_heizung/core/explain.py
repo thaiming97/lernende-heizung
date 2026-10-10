@@ -35,6 +35,7 @@ class Situation:
     learning_paused: str | None = None
     window_wait_until: float | None = None  # Fenster wieder zu, Ventil bleibt bis dahin zu
     sofi: bool = False  # Sofi-Modus gilt für diese Zone
+    hand_until: float | None = None  # von Hand eingestellt, gilt bis dahin
 
 
 def _n(x: float, d: int = 1) -> str:
@@ -108,6 +109,9 @@ def explain(s: Situation) -> str:
             parts.append(f"Lernen pausiert: {s.learning_paused}.")
 
     text = " ".join(parts)
-    if s.sofi and r in ("komfort", "absenkung", "vorheizen", "beobachten", "rueckfall"):
+    if s.hand_until is not None and r in ("komfort", "absenkung", "vorheizen", "beobachten", "rueckfall"):
+        hh = s.fmt_time(s.hand_until)
+        text = f"Von Hand bis {'0 Uhr' if hh == '00:00' else hh} – " + text
+    elif s.sofi and r in ("komfort", "absenkung", "vorheizen", "beobachten", "rueckfall"):
         text = "Sofi da – " + text
     return text if len(text) <= MAX_LEN else text[: MAX_LEN - 1] + "…"

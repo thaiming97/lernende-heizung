@@ -46,9 +46,12 @@ Releases auf GitHub (HACS zeigt die Notizen beim Update an).
 
 Komfortzeiten als Text, z. B. `Mo-Fr 05:00-05:30, 15:30-22:30; Sa-So 08:00-22:30`
 oder `immer` (Tage auch ausgeschrieben oder englisch, z. B. `Tue-Thu`). Außerhalb gilt die
-Absenkung. Eine von Hand verstellte Temperatur gilt bis zum nächsten Wechsel im Zeitplan
-(auch bei Preset oder „Abwesend“); ein Wechsel der Anwesenheit hebt sie auf. Gibt es keinen
-Wechsel (`immer`), bleibt sie, bis Preset, Modus oder Anwesenheit geändert werden.
+Absenkung. Alles, was von Hand eingestellt wird – Temperatur, „Heizen“ oder ein Preset –, gilt bis
+Mitternacht (auch über Zeitplanwechsel und „Abwesend“ hinweg), danach läuft die Zone wieder in
+Automatik. Ein Wechsel der Anwesenheit hebt eine verstellte Temperatur früher auf. Eine auf „Aus“
+gestellte Zone bleibt aus. Solange etwas von Hand gilt, steht der Status auf „Von Hand (bis 0 Uhr)“,
+das Thermostat hat die Attribute `manuell` und `manuell_bis`, und die Erklärung beginnt mit
+„Von Hand bis 0 Uhr“.
 
 ## Besuch, der es wärmer mag („Sofi da“)
 

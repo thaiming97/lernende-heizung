@@ -22,7 +22,8 @@ from . import HeatingConfigEntry
 from .coordinator import HeatingCoordinator, Zone
 from .entity import HubEntity, ZoneEntity
 
-REASONS = ["komfort", "absenkung", "vorheizen", "fenster", "frostschutz", "aus", "rueckfall", "kein_sensor", "sommer", "beobachten"]
+REASONS = ["komfort", "absenkung", "vorheizen", "fenster", "frostschutz", "aus", "rueckfall", "kein_sensor", "sommer", "beobachten",
+           "manuell"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -60,6 +61,15 @@ def _gain_now(c: HeatingCoordinator, z: Zone):
     return round(p.heat_gain(c.t_out) * radiator_factor(z.controller.curve.supply(c.t_out), t), 3)
 
 
+def _status(c, z) -> str | None:
+    """Grund der Entscheidung – „manuell“, solange eine Einstellung von Hand gilt (sonst sähe es wie Automatik aus)."""
+    if z.decision is None:
+        return None
+    if z.decision.reason in ("komfort", "absenkung") and c.hand_until(z, time.time()) is not None:
+        return "manuell"
+    return z.decision.reason
+
+
 ZONE_SENSORS: tuple[ZoneSensorDesc, ...] = (
     ZoneSensorDesc(key="valve", native_unit_of_measurement=PERCENTAGE, state_class=SensorStateClass.MEASUREMENT,
                    icon="mdi:valve", value=lambda c, z: z.valve_pct),
@@ -75,7 +85,7 @@ ZONE_SENSORS: tuple[ZoneSensorDesc, ...] = (
                    state_class=SensorStateClass.MEASUREMENT, value=lambda c, z: _plan_temp(z, 3)),
     ZoneSensorDesc(key="preheat_start", device_class=SensorDeviceClass.TIMESTAMP, value=lambda c, z: _preheat(z)),
     ZoneSensorDesc(key="status", device_class=SensorDeviceClass.ENUM, options=REASONS,
-                   value=lambda c, z: z.decision.reason if z.decision else None),
+                   value=lambda c, z: _status(c, z)),
     ZoneSensorDesc(key="saving", native_unit_of_measurement=PERCENTAGE, state_class=SensorStateClass.MEASUREMENT, icon="mdi:piggy-bank",
                    value=lambda c, z: None if z.saving_pct is None else round(z.saving_pct, 1)),
     ZoneSensorDesc(key="learning", native_unit_of_measurement=PERCENTAGE, state_class=SensorStateClass.MEASUREMENT,

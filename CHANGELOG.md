@@ -4,6 +4,24 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.8.0 – 2026-10-10
+
+- **Von Hand eingestellt gilt bis Mitternacht.** Wer die Temperatur einer Zone verstellt, auf „Heizen“
+  schaltet oder ein Preset wählt, behält das bis 0 Uhr – danach läuft die Zone wieder in Automatik. Bisher
+  blieb eine verstellte Temperatur bei Zeitplan „immer“ unbefristet stehen. Der Regler plant das Ende schon
+  mit ein (heizt bei Bedarf rechtzeitig für den Automatik-Sollwert). „Aus“ bleibt aus. Bestehende
+  Einstellungen von Hand enden nach dem Update an der nächsten Mitternacht.
+- **Man sieht, dass gerade von Hand eingestellt ist:** Status „Von Hand (bis 0 Uhr)“, die Erklärung beginnt
+  mit „Von Hand bis 0 Uhr – …“, und das Thermostat hat die Attribute `manuell` (ja/nein) und `manuell_bis`.
+  (Das bisherige Attribut `uebersteuert_bis` entfällt.)
+- **Zweitsensor ersetzt den Raumsensor nur noch bei Sonne.** Der zweite Sensor einer Zone ist nur dafür da,
+  Sonnenspitzen am Hauptsensor zu überbrücken. Bisher sprang er aber auch ein, wenn er selbst deutlich kälter
+  wurde als sonst – z. B. die Küche beim Kochen oder Lüften. Dann rechnete die Zone Wohnen mit der Küche
+  (20,8 statt 22,4 °C im Wohnzimmer), heizte unnötig auf und zeigte auf den Dashboards die falsche
+  Temperatur. Ohne Sonne gilt jetzt immer der Hauptsensor, und große Abweichungen verstellen den gelernten
+  Abstand der beiden Sensoren nicht mehr. Der Hinweis im Zonenformular sagt jetzt deutlich: nur ein Sensor
+  im selben Raum, kein Nebenraum.
+
 ## 0.7.0 – 2026-10-09
 
 - **Neu: Schalter „Türen offen“** (`switch.tueren_offen_lh`). Für Tage, an denen die Innentüren offen stehen,

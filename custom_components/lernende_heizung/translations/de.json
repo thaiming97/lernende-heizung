@@ -38,7 +38,7 @@
         "data_description": {
           "schedule": "z. B. „Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30“ oder „immer“",
           "radiator_kw": "Grob reicht: Typ 11 ≈ 0,8 kW je Meter, Typ 21 ≈ 1,2, Typ 22 ≈ 1,6 (60 cm hoch). Das Modell lernt den echten Wert.",
-          "temp_sensor_2": "Z. B. Küchensensor, wenn der Hauptsensor zeitweise direkte Sonne abbekommt.",
+          "temp_sensor_2": "Nur gegen Sonnenspitzen: Sensor im selben Raum ohne direkte Sonne. Zählt nur, solange auf den Hauptsensor die Sonne scheint – keinen Nebenraum (z. B. Küche) eintragen.",
           "sofi_temp": "Leer lassen = Raum bleibt wie immer. Gilt, solange der Schalter „Sofi da“ an ist – auch bei Abwesend/Urlaub."
         }
       },
@@ -141,7 +141,8 @@
         "state": {
           "komfort": "Komfort", "absenkung": "Absenkung", "vorheizen": "Vorheizen", "fenster": "Fenster offen",
           "frostschutz": "Frostschutz", "aus": "Aus", "rueckfall": "Sicherheitsbetrieb", "kein_sensor": "Sensor fehlt",
-          "sommer": "Sommer", "beobachten": "Nur beobachten"
+          "sommer": "Sommer", "beobachten": "Nur beobachten",
+          "manuell": "Von Hand (bis 0 Uhr)"
         }
       },
       "saving": {"name": "Einsparung durch Absenkung"},

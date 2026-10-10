@@ -370,6 +370,19 @@ def test_room_filter_replaces_sun_spike():
     assert flt.disturbed and abs(val - 22.1) < 0.2
 
 
+def test_room_filter_ignores_cold_second_sensor_without_sun():
+    # Live 10.10.: Küche beim Kochen/Lüften 22,0 → 20,8 °C, die Zone rechnete mit 20,8 statt 22,4 °C
+    flt = RoomSensorFilter()
+    ts = 0.0
+    for _ in range(40):
+        ts += 300
+        flt.update(ts, 22.0, 21.9, sun=False)
+    for sec in (21.5, 21.0, 20.5, 20.8, 21.4):
+        ts += 300
+        assert flt.update(ts, 22.4, sec, sun=False) == 22.4 and not flt.disturbed
+    assert abs(flt.offset - 0.1) < 0.1  # Ausreißer > 1 K verschieben den üblichen Abstand nicht
+
+
 def _airing(flt: RoomSensorFilter, settle_min: float, sun: bool) -> list[float]:
     """Bad lüften: 10 min Fenster auf (−2 K), danach erholt sich die Luft in ~20 min (kein Zweitsensor)."""
     out = []

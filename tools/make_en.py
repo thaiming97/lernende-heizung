@@ -35,7 +35,7 @@ en["config"]["step"]["zone"] = {
     "data_description": {
         "schedule": "e.g. Mo-Fr 06:00-08:00, 16:30-22:00; Sa-So 07:30-22:30 or immer",
         "radiator_kw": "A rough value is fine; the model learns the real one.",
-        "temp_sensor_2": "Replaces the main sensor while it gets direct sun.",
+        "temp_sensor_2": "Only against sun spikes: a sensor in the same room without direct sun. Used only while the sun shines on the main sensor – do not use an adjoining room (e.g. kitchen).",
         "sofi_temp": SOFI_DESC,
     },
 }
@@ -70,7 +70,7 @@ en["entity"]["select"]["season"]["state"] = {"auto": "Automatic (heating limit)"
 en["entity"]["climate"]["zone"]["state_attributes"]["preset_mode"]["state"] = {"none": "Schedule", "comfort": "Comfort", "eco": "Setback", "away": "Away"}
 en["entity"]["sensor"]["status"]["state"] = {
     "komfort": "Comfort", "absenkung": "Setback", "vorheizen": "Preheating", "fenster": "Window open", "frostschutz": "Frost protection",
-    "aus": "Off", "rueckfall": "Safe mode", "kein_sensor": "Sensor missing", "sommer": "Summer", "beobachten": "Observe only",
+    "aus": "Off", "rueckfall": "Safe mode", "kein_sensor": "Sensor missing", "sommer": "Summer", "beobachten": "Observe only", "manuell": "Manual (until midnight)",
 }
 txt = json.dumps(en, ensure_ascii=False, indent=2) + "\n"
 (base / "translations" / "en.json").write_text(txt, encoding="utf8")
