@@ -69,6 +69,7 @@ from .const import (
     SEASON_SUMMER,
     SEASON_WINTER,
     SENSOR_STALE_S,
+    STARTUP_GRACE_S,
     SUPPLY_STALE_S,
     STORE_SAVE_DELAY_S,
     STORE_SAVE_INTERVAL_S,
@@ -80,6 +81,7 @@ from .const import (
 )
 from .core.actuator import ValveGate
 from .core.controller import (
+    REASON_NO_SENSOR,
     REASON_OFF,
     Decision,
     Target,
@@ -265,6 +267,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._window_timers: set = set()
         self._last_ts: float | None = None
         self._saved_ts = 0.0
+        self._start_ts = time.time()
         self._build_zones()
 
     # ------------------------------------------------------------------ Aufbau
@@ -755,6 +758,12 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     dec = Decision(0.0, 0.0, REASON_OFF)
             if not controlling:
                 dec = Decision(dec.u_eff, dec.valve, REASON_OBSERVE if self.master_on else REASON_OFF, dec.plan, dec.disturbance)
+            elif dec.reason == REASON_NO_SENSOR and now_ts - self._start_ts < STARTUP_GRACE_S:
+                # Kurz nach dem Start fehlt der Raumsensor meist nur, weil er sich noch nicht gemeldet hat:
+                # Ventile so lassen, statt alle auf die Notöffnung zu stellen (live 10.10.: alle auf 12 %)
+                z.decision = dec
+                self._describe(z, now_ts, summer)
+                continue
             # Ende der Fensterpause: sofort stellen, nicht erst nach dem Mindestabstand zwischen Ventilbefehlen
             resume = z.decision is not None and z.decision.reason == "fenster" and dec.reason != "fenster"
             z.decision = dec

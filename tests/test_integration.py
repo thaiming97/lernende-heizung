@@ -558,6 +558,29 @@ async def test_hand_settings_end_at_midnight(hass: HomeAssistant, freezer) -> No
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
+async def test_no_emergency_valve_while_sensors_start(hass: HomeAssistant, freezer) -> None:
+    """Live 10.10.: nach dem HA-Neustart war der Raumsensor noch nicht da → alle Ventile sofort auf 12 %."""
+    calls = async_mock_service(hass, "number", "set_value")
+    _trv(hass, "bad")
+    hass.states.async_set("sensor.bad_temp", "unavailable")
+    hass.states.async_set("binary_sensor.fenster_bad", "off")
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={CONF_ZONES: [ZONE]})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    await hass.services.async_call("switch", "turn_on", {"entity_id": _eid(hass, entry, "switch", "bad_active")}, blocking=True)
+    await hass.async_block_till_done()
+    valve = lambda: [c for c in calls if "valve_opening" in c.data["entity_id"]]  # noqa: E731
+    assert valve() == []
+    # bleibt der Sensor weg, gilt nach der Anlaufzeit die Notöffnung
+    freezer.tick(timedelta(minutes=11))
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert valve() and hass.states.get("sensor.bad_status_lh").state == "kein_sensor"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_state_survives_restart(hass: HomeAssistant) -> None:
     async_mock_service(hass, "number", "set_value")
     entry = await _setup(hass)

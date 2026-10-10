@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.8.0"
+VERSION: Final = "0.8.1"
 
 PLATFORMS: Final = ["binary_sensor", "button", "climate", "datetime", "select", "sensor", "switch"]
 
@@ -54,6 +54,7 @@ WINDOW_RESUME_S: Final = 900  # nach dem Schließen so lange zu lassen – die L
 DOORS_SETTLE_S: Final = 3600
 DOORS_NOTICE_S: Final = 12 * 3600  # so lange an → Hinweis „vergessen?“ (Lernen steht sonst still)
 EXT_TEMP_REFRESH_S: Final = 1800  # Raumtemperatur spätestens so oft an die Köpfe schicken, auch wenn gleich
+STARTUP_GRACE_S: Final = 600  # nach dem Start melden sich die Sensoren erst nach und nach
 SENSOR_STALE_S: Final = 3 * 3600  # Raumsensor ohne Meldung → als ausgefallen behandeln
 SUPPLY_STALE_S: Final = 2 * 3600  # Vorlauffühler ohne Meldung → Wert nicht mehr verwenden
 HEATING_LIMIT_HYST: Final = 0.5  # K um die Heizgrenze, damit die Automatik nicht hin- und herschaltet

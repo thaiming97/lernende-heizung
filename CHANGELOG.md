@@ -4,6 +4,14 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.8.1 – 2026-10-10
+
+- **Kein Notbetrieb mehr direkt nach dem Neustart.** Startet Home Assistant, melden sich die Raumsensoren erst nach
+  und nach. Bisher stellte die Heizung in dieser Zeit alle Ventile sofort auf die Notöffnung (12 %), und weil
+  zwischen zwei Ventilbefehlen mindestens 20 Minuten liegen, blieb z. B. das Bad so lange fast zu. Jetzt bleiben
+  die Ventile in den ersten 10 Minuten nach dem Start, wie sie sind; fehlt der Sensor danach immer noch, gilt
+  wie bisher die Notöffnung.
+
 ## 0.8.0 – 2026-10-10
 
 - **Von Hand eingestellt gilt bis Mitternacht.** Wer die Temperatur einer Zone verstellt, auf „Heizen“
