@@ -30,7 +30,6 @@ from custom_components.lernende_heizung.core.model import (
     ZoneState,
     effective_valve,
     radiator_factor,
-    steady_heat_demand,
     step,
     valve_from_effective,
 )
@@ -142,35 +141,44 @@ def test_controller_safety_layers():
     assert ctrl.decide(0.0, 5.0, x, tgt, lambda t: 0.0, lambda t: NO_SUN).valve == 1.0
     assert ctrl.decide(0.0, 20.0, x, tgt, lambda t: 0.0, lambda t: NO_SUN, enabled=False).reason == REASON_OFF
     d = ctrl.decide(0.0, None, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
-    assert d.reason == REASON_NO_SENSOR and ctrl.sensor_hold  # gerade erst weg: Öffnung bleibt
+    assert d.reason == REASON_NO_SENSOR and ctrl.sensor_mode == "halten"  # gerade erst weg: Öffnung bleibt
     d = ctrl.decide(7200.0, None, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
-    assert d.reason == REASON_NO_SENSOR and not ctrl.sensor_hold and 0 < d.valve < 1
+    assert d.reason == REASON_NO_SENSOR and ctrl.sensor_mode == "fest" and 0 < d.valve < 1
 
 
-def test_no_sensor_holds_then_follows_learned_demand():
+def test_no_sensor_holds_then_uses_recent_mean_opening():
     """Bis 0.8 sprang die Zone beim kleinsten Aussetzer (Box wird geflasht) auf feste 35/50 % Wirkung."""
-    p = ZoneParams()
-    ctrl = ZoneController(p)
-    x = Inputs(t_out=0.0, t_nbr=21.0)
+    ctrl = ZoneController(ZoneParams())
+    x = Inputs(t_out=8.0, t_nbr=21.0)
     tgt = lambda _ts: Target(21.0, True)  # noqa: E731
-    ctrl.observe(0.0, 20.8, x, 0.0)
-    before = ctrl.decide(0.0, 20.8, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
+    # ohne Verlauf (frisch eingerichtet) gilt nach der Haltezeit weiter die feste Notöffnung
+    fresh = ZoneController(ZoneParams())
+    fresh.observe(0.0, 20.8, x, 0.0)
+    assert fresh.decide(7200.0, None, x, tgt, lambda t: 0.0, lambda t: NO_SUN).u_eff == 0.35
+    assert fresh.sensor_mode == "fest"
+    # 12 h Verlauf: nachts (6 h) 0,8 offen, tags (6 h) zu → Mittel ~0,4
+    ts = 0.0
+    for k in range(144):
+        ctrl.observe(ts, 21.0, x, 0.8 if k < 72 else 0.0)
+        ts += 300
+    mean = ctrl.u_mean()
+    assert mean is not None and 0.3 < mean < 0.5
+    ctrl.u_eff = 0.1
+    before = ctrl.decide(ts, None, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
     # 40 min ohne Raumwert: Ventil bleibt, wie es war
-    d = ctrl.decide(2400.0, None, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
-    assert ctrl.sensor_hold and d.valve == pytest.approx(before.valve)
-    # nach 1 h: Öffnung aus dem Dauer-Wärmebedarf (mit Reserve), nicht mehr fester Wert
-    d = ctrl.decide(4000.0, None, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
-    demand = steady_heat_demand(p, 21.0, 0.0, 21.0)
-    u_ss = demand / (radiator_factor(HeatingCurve().supply(0.0), 21.0) * p.heat_gain(0.0))
-    assert not ctrl.sensor_hold
-    assert d.u_eff == pytest.approx(min(1.0, max(0.15, 1.2 * u_ss)))
-    # kühlere Nachbarräume → mehr; wärmere → weniger, aber nie ganz zu
-    cool = ctrl.decide(4300.0, None, Inputs(t_out=0.0, t_nbr=15.0), tgt, lambda t: 0.0, lambda t: NO_SUN)
-    warm = ctrl.decide(4600.0, None, Inputs(t_out=0.0, t_nbr=24.0), tgt, lambda t: 0.0, lambda t: NO_SUN)
-    assert cool.u_eff > d.u_eff > warm.u_eff == pytest.approx(0.15)
+    d = ctrl.decide(ts + 2400, None, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
+    assert ctrl.sensor_mode == "halten" and d.u_eff == before.u_eff == 0.1
+    # nach 1 h: mittlere Öffnung mit Reserve
+    d = ctrl.decide(ts + 4000, None, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
+    assert ctrl.sensor_mode == "mittel" and d.u_eff == pytest.approx(1.2 * mean)
     # Raumwert wieder da → sofort normal planen
-    back = ctrl.decide(4900.0, 20.9, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
-    assert back.reason == "komfort" and back.plan is not None and not ctrl.sensor_hold
+    ctrl.observe(ts + 4300, 20.9, x, d.u_eff)
+    back = ctrl.decide(ts + 4300, 20.9, x, tgt, lambda t: 0.0, lambda t: NO_SUN)
+    assert back.reason == "komfort" and back.plan is not None and ctrl.sensor_mode is None
+    # das Mittel übersteht einen Neustart
+    ctrl2 = ZoneController(ZoneParams())
+    ctrl2.restore(ctrl.export())
+    assert ctrl2.u_mean() == pytest.approx(ctrl.u_mean())
 
 
 def test_controller_replans_right_after_window():

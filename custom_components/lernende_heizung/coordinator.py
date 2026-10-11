@@ -910,7 +910,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             heat_missing=heat_missing, master_on=self.master_on, hvac_off=z.hvac_off,
             learning_paused=paused, window_wait_until=self._window_wait_until(z, now_ts), sofi=self.sofi_active(z),
             hand_until=self.hand_until(z, now_ts),
-            sensor_hold=z.controller.sensor_hold, sensor_last_ts=z.controller.last_ts,
+            sensor_mode=z.controller.sensor_mode, sensor_last_ts=z.controller.last_ts,
         )
         z.explanation = explain(sit)
         p = z.controller.params

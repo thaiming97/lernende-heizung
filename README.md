@@ -22,8 +22,8 @@ auch mit anderen Thermostatköpfen.
 - **Vorlauffühler (optional)**: Rohrfühler am Vorlauf eines Heizkörpers oder Heizstrangs – zählt,
   sobald ein Ventil der gewählten Zonen offen ist; lernt die Heizkurve, eine Nachtabsenkung des
   Kessels und erkennt, wenn der Kessel nichts liefert.
-- **Sensor fällt aus**: Raumsensor weg → Ventil bleibt erst eine Stunde, dann Öffnung nach dem
-  gelernten Wärmebedarf. Nicht erreichbare Fensterkontakte zählen als geschlossen (mit Hinweis),
+- **Sensor fällt aus**: Raumsensor weg → Ventil bleibt erst eine Stunde, dann die mittlere Öffnung
+  der letzten 24 h. Nicht erreichbare Fensterkontakte zählen als geschlossen (mit Hinweis),
   ein hängender Helligkeitssensor wird nach einer Stunde ignoriert.
 - **Statistiken**: Heizleistung, Heizenergie, Wärmebedarf, Vorhersage 1 h/3 h, nächster
   Vorheizstart, Einsparung durch Absenkung, Lernfortschritt, Modellfehler, Zeitkonstante,

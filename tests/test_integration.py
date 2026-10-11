@@ -966,8 +966,8 @@ async def test_options_supply_accepts_several_zones(hass: HomeAssistant) -> None
     assert [z.zid for z in entry.runtime_data._supply_zones()] == ["bad"]
 
 
-async def test_room_sensor_dropout_holds_then_uses_learned_demand(hass: HomeAssistant, freezer) -> None:
-    """Bis 0.8: Raumsensor kurz weg (z. B. Box wird geflasht) → sofort feste Notöffnung."""
+async def test_room_sensor_dropout_holds_first(hass: HomeAssistant, freezer) -> None:
+    """Bis 0.8: Raumsensor kurz weg (z. B. Box wird geflasht) → sofort feste Notöffnung. Jetzt erst halten."""
     calls = async_mock_service(hass, "number", "set_value")
     with patch.object(trv_mod, "BUMP_DELAY_S", 0):
         entry = await _setup(hass)
@@ -992,11 +992,11 @@ async def test_room_sensor_dropout_holds_then_uses_learned_demand(hass: HomeAssi
         # (der Mock-TRV bestätigt nie → gleicher Wert wird wiederholt, aber kein anderer gestellt)
         assert {c.data["value"] for c in calls if "valve_opening" in c.data["entity_id"]} <= {before}
         assert "bleibt vorerst" in hass.states.get("sensor.bad_erklaerung_lh").state
-        for _ in range(8):  # nach über 1 h: Öffnung aus dem gelernten Wärmebedarf
+        for _ in range(8):  # nach über 1 h: mittlere Öffnung der letzten Zeit (bzw. fest, ohne Verlauf)
             freezer.tick(timedelta(minutes=5))
             await coord.async_refresh()
             await hass.async_block_till_done()
-        assert "Wärmebedarf" in hass.states.get("sensor.bad_erklaerung_lh").state
+        assert "feste Öffnung" in hass.states.get("sensor.bad_erklaerung_lh").state  # erst 11 min Verlauf
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 

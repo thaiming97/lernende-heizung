@@ -4,6 +4,16 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.9.1 – 2026-10-11
+
+- **Raumsensor fällt aus: nach der Haltezeit die übliche Öffnung.** Nach einer Stunde ohne Raumwert stellt die
+  Heizung jetzt die mittlere Ventilöffnung der letzten rund 24 Stunden ein (mit 20 % Reserve, nie ganz zu).
+  In 0.9.0 war es der Dauer-Wärmebedarf aus dem gelernten Modell. Mit den echten Werten nachgerechnet hätte
+  das Bad damit nur 2 % bekommen, obwohl es nachts ganz offen stand. Der Modellwert ist dafür zu unsicher.
+  Ohne Verlauf (gerade erst eingerichtet) gilt wie früher die feste Notöffnung. Die Erklärung sagt, was gilt.
+- Hinweis zum Sensor „Wärmebedarf“: Er rechnet seit 0.9.0 mit den Nachbarzonen, bleibt aber ein Modellwert.
+  Fürs Bad liegt er weiter deutlich unter dem, was es tatsächlich braucht.
+
 ## 0.9.0 – 2026-10-11
 
 - **Vorlauffühler zählt für den ganzen Heizstrang.** Unter „Konfigurieren → Vorlauffühler“ lassen sich jetzt
