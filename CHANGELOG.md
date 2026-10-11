@@ -4,6 +4,32 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.9.0 – 2026-10-11
+
+- **Vorlauffühler zählt für den ganzen Heizstrang.** Unter „Konfigurieren → Vorlauffühler“ lassen sich jetzt
+  mehrere Zonen wählen: alle, deren Ventile Wasser am Fühler vorbeischicken. Er zählt, sobald eines davon offen
+  ist. Bisher nur bei einer Zone – nachts, wenn nur das Bad heizte, wurde der echte Vorlauf verworfen, und die
+  Nachtabsenkung des Kessels war nur für einen Teil der Nacht bekannt. Bestehende Einstellungen gelten weiter.
+- **Die gelernte Heizkurve bleibt stabil.** Messungen aus der Nachtabsenkung des Kessels zählen nur noch für
+  den Versatz ihrer Uhrzeit, nicht mehr für die Kurve selbst. Sonst hätten die vielen neuen Nachtwerte die
+  Kurve Tag für Tag nach unten gezogen (Simulation: knapp 1 K in 10 Tagen), und die gelernte Heizwirkung wäre
+  jedes Mal umgerechnet worden. Die Nachtabsenkung wird gegen die übliche Stunde erkannt.
+- **Raumsensor fällt aus: erst halten, dann nach Bedarf.** Bisher sprang das Ventil sofort auf einen festen
+  Wert, auch bei einem kurzen Aussetzer (z. B. wenn eine Sensorbox neu aufgespielt wird). Jetzt bleibt es eine
+  Stunde lang, wie es war; danach stellt die Heizung die Öffnung ein, mit der das gelernte Modell die
+  Wunschtemperatur hält (mit etwas Reserve, nie ganz zu). Die Erklärung sagt, welcher Fall gerade gilt.
+- **Hängender Helligkeitssensor wird erkannt.** Meldet der Lux-Sensor über eine Stunde nichts, rechnet die
+  Heizung mit Sonnenstand und Bewölkungsvorhersage. Bisher galt der letzte Wert weiter (am 10.10. zeigte
+  „Sonnenstrahlung“ deshalb bis 23 Uhr 50 W/m²).
+- **Hinweis bei nicht erreichbarem Fenster-/Türkontakt.** Ist ein Kontakt über eine Stunde nicht erreichbar,
+  steht das in der Problemliste der Zone. Er zählt dann als geschlossen – die Heizung läuft weiter.
+- **Wärmebedarf mit Nachbarräumen.** Der Sensor „Wärmebedarf“ rechnet jetzt mit der Temperatur der anderen
+  Zonen. Das Bad (23,5 °C) verliert seine Wärme vor allem an die kühleren Räume nebenan und zeigte vorher
+  fast 0 W, während sein Ventil nachts ganz offen stand.
+- **Verlauf im Diagnose-Download:** die letzten 288 Entscheidungen je Zone (etwa 24 Stunden) mit Grund,
+  Temperaturen, Ventil, Vorlauf, Sonne und Problemen – für die Fehlersuche.
+- Kleinigkeit: Die Nachtabsenkung beim Vorlauf zeigt „ca. −5 K“ statt „ca, -5 K“.
+
 ## 0.8.1 – 2026-10-10
 
 - **Kein Notbetrieb mehr direkt nach dem Neustart.** Startet Home Assistant, melden sich die Raumsensoren erst nach

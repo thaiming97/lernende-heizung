@@ -203,5 +203,5 @@ class SupplySensor(HubEntity, SensorEntity):
             attrs["rohrfuehler_status"] = c.supply_note
         nb = s.night_setback()
         if nb:
-            attrs["nachtabsenkung"] = f"{nb[0]:02d}–{(nb[1] + 1) % 24:02d} Uhr, ca. {nb[2]:.0f} K".replace(".", ",")
+            attrs["nachtabsenkung"] = f"{nb[0]:02d}–{(nb[1] + 1) % 24:02d} Uhr, ca. {nb[2]:.0f} K".replace("-", "−")
         return attrs

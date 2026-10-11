@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.8.1"
+VERSION: Final = "0.9.0"
 
 PLATFORMS: Final = ["binary_sensor", "button", "climate", "datetime", "select", "sensor", "switch"]
 
@@ -57,6 +57,10 @@ EXT_TEMP_REFRESH_S: Final = 1800  # Raumtemperatur spätestens so oft an die Kö
 STARTUP_GRACE_S: Final = 600  # nach dem Start melden sich die Sensoren erst nach und nach
 SENSOR_STALE_S: Final = 3 * 3600  # Raumsensor ohne Meldung → als ausgefallen behandeln
 SUPPLY_STALE_S: Final = 2 * 3600  # Vorlauffühler ohne Meldung → Wert nicht mehr verwenden
+# Lux-Sensor ohne Meldung → Bewölkungsvorhersage statt Messwert (live 10.10.: Wert hing 8 h fest, „Sonne“ bis 23 Uhr)
+SUN_STALE_S: Final = 3600
+CONTACT_NOTICE_S: Final = 3600  # Fenster-/Türkontakt so lange nicht erreichbar → Hinweis (zählt als zu)
+DECISION_LOG_LEN: Final = 288  # Entscheidungen je Zone im Diagnose-Download (24 h im 5-min-Takt)
 HEATING_LIMIT_HYST: Final = 0.5  # K um die Heizgrenze, damit die Automatik nicht hin- und herschaltet
 STORE_VERSION: Final = 1
 STORE_SAVE_DELAY_S: Final = 30  # nach Bedienung (Schalter, Sollwert …)

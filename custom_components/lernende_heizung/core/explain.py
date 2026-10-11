@@ -36,6 +36,8 @@ class Situation:
     window_wait_until: float | None = None  # Fenster wieder zu, Ventil bleibt bis dahin zu
     sofi: bool = False  # Sofi-Modus gilt für diese Zone
     hand_until: float | None = None  # von Hand eingestellt, gilt bis dahin
+    sensor_hold: bool = False  # Raumsensor fehlt erst kurz → Öffnung gehalten
+    sensor_last_ts: float | None = None  # letzter Raumwert
 
 
 def _n(x: float, d: int = 1) -> str:
@@ -63,7 +65,11 @@ def explain(s: Situation) -> str:
             parts.append(f"Keine Heizperiode: außen im Mittel {m}, Heizgrenze {_n(s.heating_limit, 0)} °C – "
                          "Ventile zu, Lernen pausiert.")
     elif r == "kein_sensor":
-        parts.append(f"Raumsensor meldet sich nicht – feste Öffnung {s.valve_pct} %.")
+        last = f" (zuletzt {s.fmt_time(s.sensor_last_ts)})" if s.sensor_last_ts else ""
+        if s.sensor_hold:
+            parts.append(f"Raumsensor meldet sich nicht{last} – Ventil bleibt vorerst auf {s.valve_pct} %.")
+        else:
+            parts.append(f"Raumsensor meldet sich nicht{last} – Ventil {s.want_pct} % nach gelerntem Wärmebedarf.")
     elif r == "aus":
         if not s.master_on:
             parts.append("Regelung aus – die Thermostatköpfe regeln selbst.")

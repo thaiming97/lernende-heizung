@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import math
+import statistics
 
 
 # ----------------------------------------------------------------------------- Außen
@@ -187,7 +188,7 @@ class SupplyLearner:
     """Heizkurve aus einem Rohrfühler am Heizkörper: lernt Tvl = a + b·Tout bei offenem Ventil,
     dazu einen Versatz je Tagesstunde (Nachtabsenkung des Kessels).
 
-    Der Fühler zeigt den Vorlauf nur, wenn Wasser fließt: Ventil ≥ 8 % seit 20 min und Rohr
+    Der Fühler zeigt den Vorlauf nur, wenn Wasser fließt: ein Ventil am Strang ≥ 8 % seit 20 min und Rohr
     deutlich wärmer als der Raum. (Früher 30 % – in einer gut gedämmten Wohnung steht das Ventil
     laut Simulation nur 0,4 % der Zeit so weit offen, ≥ 8 % dagegen rund ein Drittel der Zeit.)
     Bleibt das Rohr trotz weit offenem Ventil (≥ 30 %, 30 min) kalt, liefert der Kessel gerade keine
@@ -216,6 +217,8 @@ class SupplyLearner:
     OPEN_MIN = 0.08  # ab dieser Ventilöffnung zählt der Rohrfühler als Vorlauf
     COLD_OPEN_MIN = 0.3  # „Kessel kalt“ nur bei weit offenem Ventil
     HOUR_MIN_N = 5
+    LOW_K = 2.0  # so weit unter der üblichen Stunde: Absenkung → zählt nicht für die Gerade
+    LINE_SET_N = 100  # ab so vielen Messungen gilt die Gerade als gelernt (live 11.10.: 407)
     B_PRIOR = -0.8  # Startwert Steigung: K Vorlauf je K Außentemperatur (55 °C bei −10, 35 °C bei +15)
     B_PRIOR_W = 60.0  # so viele Messungen bei ±4 K Spreizung wiegt der Startwert der Steigung
     B_MIN, B_MAX = -2.0, 0.0
@@ -242,9 +245,21 @@ class SupplyLearner:
         offs = tuple(o if c >= self.HOUR_MIN_N else 0.0 for o, c in zip(self.hour_off, self.hour_n))
         return self.supply(-10), self.supply(15), offs
 
+    def _usual_offset(self) -> float:
+        """Versatz der üblichen Stunde (Median der gelernten Stunden)."""
+        offs = [self.hour_off[h] for h in range(24) if self.hour_n[h] >= self.HOUR_MIN_N]
+        return statistics.median(offs) if offs else 0.0
+
     def night_setback(self) -> tuple[int, int, float] | None:
-        """Erkannte Absenkung: (erste Stunde, letzte Stunde, mittlerer Versatz in K) oder None."""
-        low = [h for h in range(24) if self.hour_n[h] >= self.HOUR_MIN_N and self.hour_off[h] < -4.0]
+        """Erkannte Absenkung: (erste Stunde, letzte Stunde, mittlerer Versatz in K) oder None.
+
+        Bezug ist der übliche Stundenwert (Median), nicht die Gerade: Deren Niveau legen die zuerst gemessenen
+        Stunden fest – lagen die in der Absenkung, haben die Tagesstunden einen Versatz nach oben."""
+        hrs = [h for h in range(24) if self.hour_n[h] >= self.HOUR_MIN_N]
+        if not hrs:
+            return None
+        ref = self._usual_offset()
+        low = [h for h in hrs if self.hour_off[h] < ref - 4.0]
         if not low:
             return None
         # zusammenhängenden Block (über Mitternacht) finden
@@ -254,7 +269,7 @@ class SupplyLearner:
         while h in low and len(hours) < 24:
             hours.append(h)
             h = (h + 1) % 24
-        return hours[0], hours[-1], sum(self.hour_off[x] for x in hours) / len(hours)
+        return hours[0], hours[-1], sum(self.hour_off[x] for x in hours) / len(hours) - ref
 
     def update(
         self, ts: float, pipe: float | None, t_out: float | None, valve: float, pipe_offset: float = 2.0,
@@ -291,18 +306,34 @@ class SupplyLearner:
         self.cold_ts = None
         y = pipe + pipe_offset
         self.last_valid, self.last_valid_ts = y, ts
-        lam = 0.999
-        self._w = lam * self._w + 1
-        self._sx = lam * self._sx + t_out
-        self._sy = lam * self._sy + y
-        self._sxx = lam * self._sxx + t_out * t_out
-        self._sxy = lam * self._sxy + t_out * y
+        h = None if hour is None else hour % 24
+        # Messungen aus der Absenkung zählen nicht für die Gerade (die steht für den Normalbetrieb), nur für den
+        # Versatz ihrer Stunde. Sonst zieht jede Nachtmessung sie nach unten – mit dem Fühler über den ganzen
+        # Strang gibt es nachts viele davon –, die Kurve wandert, und die Heizwirkung wird jedes Mal umgerechnet
+        # (Simulation: bisher −0,9 K in 10 Tagen, so ±0,05 K). Maßstab ist die übliche Stunde, damit eine
+        # dauerhaft andere Kesseleinstellung weiter in die Gerade geht. Für eine Stunde ohne gelernten Versatz
+        # entscheidet die einzelne Messung, mit doppeltem Abstand. Erst ab LINE_SET_N Messungen: Vorher ist die
+        # Steigung noch der Startwert, und bei fallender Außentemperatur läge schon der Normalbetrieb „unter
+        # der Geraden“ – ausgerechnet die Messungen, aus denen sie die Steigung lernt (Test erster Abend).
+        to_line = True
+        if h is not None and self.n >= self.LINE_SET_N:
+            usual = self._usual_offset()
+            if self.hour_n[h] >= self.HOUR_MIN_N:
+                to_line = self.hour_off[h] - usual >= -self.LOW_K
+            else:
+                to_line = y - (self.a + self.b * t_out) - usual >= -2 * self.LOW_K
+        if to_line:
+            lam = 0.999
+            self._w = lam * self._w + 1
+            self._sx = lam * self._sx + t_out
+            self._sy = lam * self._sy + y
+            self._sxx = lam * self._sxx + t_out * t_out
+            self._sxy = lam * self._sxy + t_out * y
         self.n += 1
         self._fit()
         # Versatz je Tagesstunde erst, wenn das Niveau gemessen ist – vorher wäre die Abweichung von der
         # angenommenen Kurve fälschlich eine „Absenkung“ genau der Stunden, in denen zuerst gemessen wurde
-        if hour is not None and self.n >= 10:
-            h = hour % 24
+        if h is not None and self.n >= 10:
             c = self.hour_n[h]
             a = max(0.05, 1.0 / (c + 1))
             self.hour_off[h] += a * ((y - (self.a + self.b * t_out)) - self.hour_off[h])

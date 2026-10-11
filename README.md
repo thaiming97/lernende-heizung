@@ -19,8 +19,12 @@ auch mit anderen Thermostatköpfen.
   selbst, mit ihrem eingebauten Fühler.
 - **Erklärt sich selbst**: Sensor „Erklärung“ je Zone sagt in einem Satz, was die Regelung tut
   und warum; als Attribute der 12-h-Plan und alle Kennzahlen. Sensor „Problem“ meldet Störungen.
-- **Vorlauffühler (optional)**: Rohrfühler am Vorlauf eines Heizkörpers – lernt die Heizkurve,
-  eine Nachtabsenkung des Kessels und erkennt, wenn der Kessel nichts liefert.
+- **Vorlauffühler (optional)**: Rohrfühler am Vorlauf eines Heizkörpers oder Heizstrangs – zählt,
+  sobald ein Ventil der gewählten Zonen offen ist; lernt die Heizkurve, eine Nachtabsenkung des
+  Kessels und erkennt, wenn der Kessel nichts liefert.
+- **Sensor fällt aus**: Raumsensor weg → Ventil bleibt erst eine Stunde, dann Öffnung nach dem
+  gelernten Wärmebedarf. Nicht erreichbare Fensterkontakte zählen als geschlossen (mit Hinweis),
+  ein hängender Helligkeitssensor wird nach einer Stunde ignoriert.
 - **Statistiken**: Heizleistung, Heizenergie, Wärmebedarf, Vorhersage 1 h/3 h, nächster
   Vorheizstart, Einsparung durch Absenkung, Lernfortschritt, Modellfehler, Zeitkonstante,
   Grundwärme (Personen, Geräte), geschätzter Vorlauf, Außentemperatur (Wetterdienst + eigener Fühler fusioniert).

@@ -44,8 +44,8 @@ o = en["options"]["step"]
 o["init"] = {"title": "Settings", "menu_options": {"general": "Home (weather, outdoor, sun)", "supply": "Supply temperature sensor",
                                                   "add_zone": "Add zone", "edit_zone": "Edit zone", "remove_zone": "Remove zone"}}
 o["general"] = {"title": "Home", "data": gen}
-o["supply"] = {"title": "Supply sensor (optional)", "description": "Pipe sensor on a supply pipe (at a radiator or at the start of a branch); only valid while water flows – choose the zone whose valve sends water through this pipe.",
-               "data": {"supply_sensor": "Pipe sensor", "supply_zone": "Water flows when this zone heats"}}
+o["supply"] = {"title": "Supply sensor (optional)", "description": "Pipe sensor on a supply pipe (at a radiator or at the start of a branch); only valid while water flows – choose all zones whose valves send water past this pipe (on a branch: all zones on it). It counts as soon as one of these valves is open.",
+               "data": {"supply_sensor": "Pipe sensor", "supply_zone": "Water flows when one of these zones heats"}}
 o["add_zone"] = {"title": "Add zone", "data": zd, "data_description": {"sofi_temp": SOFI_DESC}}
 o["zone_form"] = {"title": "Edit zone", "data": zd, "data_description": {"sofi_temp": SOFI_DESC}}
 o["edit_zone"] = {"title": "Edit zone", "data": {"zone": "Zone"}}

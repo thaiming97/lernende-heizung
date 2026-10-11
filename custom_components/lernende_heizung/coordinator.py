@@ -6,6 +6,7 @@ Rechenintensives (Optimierung) läuft im Executor, nicht im Event-Loop.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
@@ -42,7 +43,9 @@ from .const import (
     CONF_ZONE_ID,
     CONF_ZONE_NAME,
     CONF_ZONES,
+    CONTACT_NOTICE_S,
     CYCLE_S,
+    DECISION_LOG_LEN,
     DEFAULT_AWAY,
     DEFAULT_COMFORT,
     DEFAULT_ECO_DELTA,
@@ -74,6 +77,7 @@ from .const import (
     STORE_SAVE_DELAY_S,
     STORE_SAVE_INTERVAL_S,
     STORE_VERSION,
+    SUN_STALE_S,
     WINDOW_DELAY_S,
     WINDOW_LEARN_PAUSE_S,
     WINDOW_RESUME_S,
@@ -199,6 +203,7 @@ class Zone:
     info: dict = field(default_factory=dict)  # „was denkt die Regelung" (Sensor Erklärung)
     explanation: str | None = None
     problems: list[str] = field(default_factory=list)
+    log: deque = field(default_factory=lambda: deque(maxlen=DECISION_LOG_LEN))  # letzte Entscheidungen (Diagnose)
 
     @property
     def zid(self) -> str:
@@ -631,7 +636,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.t_out is not None:
             self.t_out_mean24 = self.t_out if self.t_out_mean24 is None else self.t_out_mean24 + (self.t_out - self.t_out_mean24) / 288
         # Sonne (Fassaden Ost/Süd/West)
-        ghi_meas = self.sun.ghi_from_lux(_num(self.hass, opts.get(CONF_SUN)))
+        ghi_meas = self.sun.ghi_from_lux(_num(self.hass, opts.get(CONF_SUN), SUN_STALE_S))
         self._clear_now = self.sun.clearness(now_ts, ghi_meas, self._fc_at(now_ts, 2))
         self.sun_now = self.sun.facades(now_ts, self._clear_now)
         self.sun_ghi = ghi_meas if ghi_meas is not None else self.sun.ghi(now_ts, self._clear_now)
@@ -661,13 +666,21 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             z.controlling = self.master_on and z.active
             z.valve_frac = self._valve_frac(z, now_ts)
 
-        # Vorlauf: Rohrfühler am Heizkörper der gewählten Zone (zählt nur, wenn dort Wasser fließt)
+        # Vorlauf: Rohrfühler am Strang der gewählten Zonen – zählt, sobald eines ihrer Ventile offen ist
+        # (live 11.10.: nachts nur das Bad offen, Rohr zeigte echte 26 °C, wurde aber verworfen, weil nur
+        # Wohnen eingetragen war). Bezug ist der kühlste Raum: Der Fühler hängt in einem davon, und ruhendes
+        # Wasser kühlt auf dessen Temperatur ab.
         supply_t = _num(self.hass, opts.get(CONF_SUPPLY), SUPPLY_STALE_S)
-        sz = self.zones.get(opts.get(CONF_SUPPLY_ZONE) or "")
-        if supply_t is not None and sz is not None and sz.valve_frac is not None:
-            self.supply.update(now_ts, supply_t, self.t_out, sz.valve_frac, t_room=sz.temp, hour=local.hour)
+        szs = self._supply_zones()
+        valves = [z.valve_frac for z in szs]
+        known = [v for v in valves if v is not None]
+        rooms = [z.temp for z in szs if z.temp is not None]
+        # eine Stellung unbekannt und die übrigen zu → unklar, ob Wasser fließt
+        if supply_t is not None and known and (len(known) == len(valves) or max(known) >= self.supply.OPEN_MIN):
+            self.supply.update(now_ts, supply_t, self.t_out, max(known), t_room=min(rooms) if rooms else None,
+                               hour=local.hour)
         self.supply_pipe = supply_t
-        self.supply_note = self._supply_note(now_ts, supply_t, sz) if opts.get(CONF_SUPPLY) else None
+        self.supply_note = self._supply_note(now_ts, supply_t, szs) if opts.get(CONF_SUPPLY) else None
         self._update_curve()
         t_out_now = self.t_out if self.t_out is not None else 5.0
         measured = self.supply.measured(now_ts)
@@ -798,12 +811,18 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         z.valve_obs = sum(obs) / len(obs) if obs else None
         return z.valve_obs
 
-    def _supply_note(self, now_ts: float, pipe: float | None, sz: Zone | None) -> str:
+    def _supply_zones(self) -> list[Zone]:
+        """Zonen, deren Heizkörper am Strang des Vorlauffühlers hängen (bis 0.8 genau eine, als Text gespeichert)."""
+        raw = self.opts.get(CONF_SUPPLY_ZONE) or []
+        ids = [raw] if isinstance(raw, str) else list(raw)
+        return [self.zones[i] for i in ids if i in self.zones]
+
+    def _supply_note(self, now_ts: float, pipe: float | None, szs: list[Zone]) -> str:
         """Kurz und verständlich: zählt der Vorlauffühler gerade, und wenn nicht, warum?"""
         s = self.supply
         if pipe is None:
             return "Fühler meldet sich nicht"
-        if sz is None:
+        if not szs:
             return "keine Zone gewählt (Konfigurieren → Vorlauffühler)"
         if s.heat_missing(now_ts):
             return "Kessel liefert keine Wärme – Rohr kalt trotz offenem Ventil"
@@ -813,12 +832,14 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if s.curve_params() is None:
                 return f"zählt – Heizwasser fließt (Heizkurve wird gelernt: {s.n}/30 Messungen)"
             return "zählt – Heizwasser fließt"
-        if sz.valve_frac is None:
-            return f"zählt nicht – Ventilstellung {sz.name} unbekannt"
-        if sz.valve_frac < s.OPEN_MIN:
-            return f"zählt nicht – Ventil {sz.name} zu"
+        known = [z.valve_frac for z in szs if z.valve_frac is not None]
+        if not known or (len(known) < len(szs) and max(known) < s.OPEN_MIN):
+            unknown = ", ".join(z.name for z in szs if z.valve_frac is None)
+            return f"zählt nicht – Ventilstellung {unknown} unbekannt"
+        if max(known) < s.OPEN_MIN:
+            return f"zählt nicht – Ventil {szs[0].name} zu" if len(szs) == 1 else "zählt nicht – alle Ventile am Strang zu"
         if s.open_since is not None and now_ts - s.open_since < 20 * 60:
-            return f"zählt gleich – Ventil {sz.name} erst seit {int((now_ts - s.open_since) // 60)} min offen"
+            return f"zählt gleich – Ventil erst seit {int((now_ts - s.open_since) // 60)} min offen"
         return "zählt nicht – Rohr kaum wärmer als der Raum (fließt kein Heizwasser)"
 
     def _update_curve(self) -> None:
@@ -889,6 +910,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             heat_missing=heat_missing, master_on=self.master_on, hvac_off=z.hvac_off,
             learning_paused=paused, window_wait_until=self._window_wait_until(z, now_ts), sofi=self.sofi_active(z),
             hand_until=self.hand_until(z, now_ts),
+            sensor_hold=z.controller.sensor_hold, sensor_last_ts=z.controller.last_ts,
         )
         z.explanation = explain(sit)
         p = z.controller.params
@@ -919,6 +941,11 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             probs.append("Kein Raumwert – Sensor meldet sich nicht")
         elif z.primary_missing and z.cfg.get(CONF_TEMP2):
             probs.append("Hauptsensor meldet sich nicht – nutze den Zweitsensor")
+        for w in z.cfg.get(CONF_WINDOWS, []):
+            st = self.hass.states.get(w)
+            since = self._start_ts if st is None else st.last_changed.timestamp()
+            if (st is None or st.state in (STATE_UNAVAILABLE, STATE_UNKNOWN)) and now_ts - since >= CONTACT_NOTICE_S:
+                probs.append(f"Kontakt {w if st is None else st.name} nicht erreichbar – zählt als geschlossen")
         for t in z.trvs:
             if not t.available():
                 probs.append(f"Thermostat {t.climate_id} nicht erreichbar")
@@ -937,6 +964,17 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.doors_forgotten(now_ts):
             probs.append("Schalter „Türen offen“ seit über 12 h an – solange lernt die Heizung nicht")
         z.problems = probs
+        # Flugschreiber für den Diagnose-Download: jede Entscheidung mit Grund und Eingängen (nur im Speicher)
+        z.log.append({
+            "zeit": dt_util.as_local(dt_util.utc_from_timestamp(now_ts)).strftime("%d.%m. %H:%M:%S"),
+            **{k: v for k, v in info.items() if k != "plan"},
+            "aussen": None if self.t_out is None else round(self.t_out, 1),
+            "sonne_fassaden": [round(s, 3) for s in self.sun_now],
+            "rohr": None if self.supply_pipe is None else round(self.supply_pipe, 1),
+            "rohr_status": self.supply_note,
+            "fenster_offen": z.window_open,
+            "probleme": probs,
+        })
 
     @staticmethod
     def _exercise_due(z: Zone, now_ts: float, local: datetime) -> bool:
@@ -1011,7 +1049,12 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.t_out is None:
             return None
         tgt = self.target_at(z, time.time())
-        return 1000 * steady_heat_demand(z.controller.params, tgt.setpoint, self.t_out) * z.controller.params.c_eff_kwh_per_k
+        # mit den Nachbarräumen: Das Bad (23,5 °C) verliert seine Wärme vor allem an die kühleren Räume nebenan –
+        # ohne sie zeigte es ~0 W Bedarf, während das Ventil nachts auf 100 % stand
+        others = [o.temp for o in self.zones.values() if o is not z and o.temp is not None]
+        t_nbr = sum(others) / len(others) if others else None
+        demand = steady_heat_demand(z.controller.params, tgt.setpoint, self.t_out, t_nbr)
+        return 1000 * demand * z.controller.params.c_eff_kwh_per_k
 
     def estimated_supply(self) -> float | None:
         """Vorlauf jetzt (Anzeige): gemessen, wenn der Fühler gerade gültig ist, sonst aus der Heizkurve."""

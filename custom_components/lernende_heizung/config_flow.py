@@ -221,12 +221,14 @@ class LernendeHeizungOptionsFlow(OptionsFlow):
             self.opts.update(_clean(user_input))
             return self._save()
         zones = [selector.SelectOptionDict(value=z[CONF_ZONE_ID], label=z[CONF_ZONE_NAME]) for z in self.opts[CONF_ZONES]]
+        cur = self.opts.get(CONF_SUPPLY_ZONE)
+        cur = [cur] if isinstance(cur, str) else cur  # bis 0.8 genau eine Zone
         schema = vol.Schema({
             vol.Optional(CONF_SUPPLY, description={"suggested_value": self.opts.get(CONF_SUPPLY)}): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
             ),
-            vol.Optional(CONF_SUPPLY_ZONE, description={"suggested_value": self.opts.get(CONF_SUPPLY_ZONE)}): selector.SelectSelector(
-                selector.SelectSelectorConfig(options=zones, mode=selector.SelectSelectorMode.DROPDOWN)
+            vol.Optional(CONF_SUPPLY_ZONE, description={"suggested_value": cur}): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=zones, multiple=True, mode=selector.SelectSelectorMode.DROPDOWN)
             ),
         })
         return self.async_show_form(step_id="supply", data_schema=schema)

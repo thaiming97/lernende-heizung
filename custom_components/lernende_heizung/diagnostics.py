@@ -43,6 +43,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Heating
                  "befehl_haengt": t.write_mismatch(now), "zusatz_entities": t.entities}
                 for t in z.trvs
             ],
+            "verlauf": list(z.log),  # letzte Entscheidungen (5-min-Takt), älteste zuerst
         }
     return {
         "version": entry.version,

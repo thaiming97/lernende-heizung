@@ -29,6 +29,7 @@ from .model import (
     anchor_weights,
     effective_valve,
     radiator_factor,
+    steady_heat_demand,
     step,
     valve_from_effective,
 )
@@ -72,6 +73,11 @@ class ControllerConfig:
     meas_alpha: float = 0.35  # Glättung Messwert je 5-min-Takt
     frost_c: float = 7.0
     iters: int = 250
+    # Raumsensor fehlt: so lange die bisherige Öffnung halten (Funkaussetzer, Box wird neu geflasht), danach
+    # die Öffnung aus dem gelernten Wärmebedarf – mit Reserve, weil niemand nachmisst, und nie ganz zu
+    sensor_hold_h: float = 1.0
+    no_sensor_margin: float = 1.2
+    no_sensor_u_min: float = 0.15
 
 
 @dataclass
@@ -113,6 +119,7 @@ class ZoneController:
     u_prev_ts: float | None = None
     plan: Plan | None = None
     hour_of: Callable[[float], int] | None = None  # Zeitstempel → lokale Stunde (für die Heizkurve)
+    sensor_hold: bool = False  # Raumsensor fehlt erst kurz → bisherige Öffnung gehalten
 
     # ------------------------------------------------------------------ Zustand
     def observe(self, ts: float, t_meas: float, x: Inputs, u_applied: float, freeze_d: bool = False) -> None:
@@ -298,10 +305,8 @@ class ZoneController:
             self.u_eff = 0.0
             return Decision(0.0, 0.0, REASON_OFF)
         if t_meas is None or not math.isfinite(t_meas):
-            # Kein Raumsensor: sicherer Mittelwert, bei Kälte mehr
-            u = 0.35 if x_now.t_out > 0 else 0.5
-            self.u_eff = u
-            return Decision(u, valve_from_effective(u, self.params.valve_exp), REASON_NO_SENSOR)
+            return self._no_sensor(ts, x_now, target_at(ts))
+        self.sensor_hold = False
         if t_meas < cfg.frost_c:
             self.u_eff = 1.0
             return Decision(1.0, 1.0, REASON_FROST)
@@ -328,6 +333,25 @@ class ZoneController:
         else:
             reason = REASON_SETBACK
         return Decision(u, valve_from_effective(u, self.params.valve_exp), reason, self.plan, self.d)
+
+    def _no_sensor(self, ts: float, x_now: Inputs, tg: Target) -> Decision:
+        """Kein Raumwert. Bis 0.8 sofort feste 35/50 % Wirkung – auch beim kurzen Aussetzer und egal, was der
+        Raum braucht. Jetzt erst die bisherige Öffnung halten, danach die, mit der das gelernte Modell den
+        Sollwert dauerhaft hält (ohne Sonne, mit Reserve)."""
+        p = self.params
+        self.sensor_hold = self.last_ts is not None and ts - self.last_ts < self.cfg.sensor_hold_h * 3600
+        if self.sensor_hold:
+            u = self.u_eff
+        else:
+            demand = steady_heat_demand(p, tg.setpoint, x_now.t_out, x_now.t_nbr)
+            hour = self.hour_of(ts) if self.hour_of else None
+            t_sup = x_now.t_supply if x_now.t_supply is not None else self.curve.supply(x_now.t_out, hour)
+            per_u = radiator_factor(t_sup, tg.setpoint) * p.heat_gain(x_now.t_out)
+            u_ss = demand / per_u if per_u > 1e-6 else 1.0
+            u = min(1.0, max(self.cfg.no_sensor_u_min, self.cfg.no_sensor_margin * u_ss))
+        self.u_eff = u
+        self.plan, self.last_plan_ts, self.u_prev = None, None, None  # mit Raumwert sofort neu planen
+        return Decision(u, valve_from_effective(u, p.valve_exp), REASON_NO_SENSOR)
 
     def _model_suspect(self, ts: float) -> bool:
         """Störgröße lange am Anschlag → das Modell erklärt die Messung nicht (Hysterese bis 50 %)."""
