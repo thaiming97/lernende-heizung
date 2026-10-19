@@ -28,6 +28,10 @@ from .model import (
 )
 
 LIN = ("k_am", "k_n", "k_o", "g_e", "g_s", "g_w", "h0", "h1", "h2", "g0")
+H_IDX = (6, 7, 8)  # Heizwirkung an den Außentemperatur-Ankern −10/0/+10 °C
+# Pseudo-Messung h0 = h1 = h2, Messrauschen relativ zur Startunsicherheit von h (fest 1,0 war bei kleinem h zu
+# schwach; Replay echter Daten 08.–19.10.: Anker auf 0,01 gleich, Vorhersagefehler unverändert)
+COUPLE_REL = 1e-3
 SAMPLE_H = 0.25
 SCORE_DECAY = 0.997  # gleitender mittlerer Fehler über ~330 Stichproben (~3,5 Tage)
 
@@ -88,6 +92,21 @@ class Rls:
                     self.P[j][i] *= f
         self.theta = _project(th, self.P, self.upper)
         return e
+
+    def couple(self, idx: tuple[int, ...], rel: float) -> None:
+        """Pseudo-Messungen θ_i − θ_j = 0 für aufeinanderfolgende idx (Messrauschen rel × Startunsicherheit, ohne
+        Vergessen/Leck): hält die Heizwirkung an den Außentemperatur-Ankern zusammen."""
+        n = len(self.theta)
+        r = rel * (self.p0[idx[0]] if self.p0 else 1.0)
+        for i, j in zip(idx, idx[1:]):
+            e = self.theta[j] - self.theta[i]
+            Px = [self.P[k][i] - self.P[k][j] for k in range(n)]
+            s = r + Px[i] - Px[j]
+            if s <= 0:
+                continue
+            g = [v / s for v in Px]
+            self.theta = _project([self.theta[k] + g[k] * e for k in range(n)], self.P, self.upper)
+            self.P = [[self.P[a][b] - g[a] * Px[b] for b in range(n)] for a in range(n)]
 
 
 def _project(th: list[float], P: list[list[float]], upper: list[float]) -> list[float]:
@@ -180,6 +199,8 @@ class ZoneLearner:
         self.last_ts: float | None = None
         # Heizkurve (Vorlauf bei −10/+15 °C), zu der die gelernte Heizwirkung h passt
         self.curve_ref = (HeatingCurve().tvl_at_m10, HeatingCurve().tvl_at_p15)
+        # Vorlauf gemessen → eine Heizwirkung für alle Außentemperaturen (siehe set_coupled)
+        self.coupled = False
 
     # -------------------------------------------------------------- Messungen
     def block(self, until_ts: float) -> None:
@@ -249,6 +270,8 @@ class ZoneLearner:
                 continue
             x = [s.tm - m["t"], m["tn"] - m["t"], m["to"] - m["t"], m["se"], m["ss"], m["sw"], *s.q, 1.0]
             c.add_error(c.rls.update(x, rate, r))
+            if self.coupled:
+                c.rls.couple(H_IDX, COUPLE_REL)
         best = min(range(len(self.cands)), key=lambda i: self.cands[i].score)
         if self.cands[best].score < 0.95 * self.cands[self.best].score:
             self.best = best
@@ -274,10 +297,49 @@ class ZoneLearner:
                 r.p0 = [v * s * s for v, s in zip(r.p0, scale)]
             r.upper = [u * max(1.0, s) for u, s in zip(r.upper, scale)]
 
+    def set_coupled(self, on: bool, t_out: float) -> None:
+        """Mit gemessenem Vorlauf steckt die Außentemperatur schon im Vorlauf (φ) – die Heizwirkung h ist dann eine
+        Größe, nicht drei. Frei gelernt passten die Anker nur zu den Außentemperaturen, die es gerade gab (live 19.10.,
+        nur 4–15 °C außen: Wohnen h 2,3/1,7/6,0 → bei 0 °C hielt das Modell die Heizkörper für halb so stark wie bei
+        +10 °C, obwohl der Vorlauf steigt). Beim Einschalten bekommen alle Anker die Heizwirkung, die bei t_out gerade
+        gilt – die Vorhersage für jetzt bleibt gleich –, danach hält sie eine Pseudo-Messung zusammen."""
+        if on and not self.coupled:
+            w = anchor_weights(t_out)
+            for c in self.cands:
+                r = c.rls
+                he = sum(wi * r.theta[i] for wi, i in zip(w, H_IDX))
+                for i in H_IDX:
+                    r.theta[i] = he
+            self._sym_bounds()
+        self.coupled = on
+
+    def _sym_bounds(self) -> None:
+        """Gekoppelt: gleiche Obergrenze, Startunsicherheit und Startwert (Zug des Lecks) für alle Anker – sonst
+        schneidet einer die anderen ab oder zieht sie auseinander."""
+        for c in self.cands:
+            r = c.rls
+            if r.prior:
+                hp = sum(r.prior[i] for i in H_IDX) / len(H_IDX)
+                for i in H_IDX:
+                    r.prior[i] = hp
+            if r.upper:
+                he = max(r.theta[i] for i in H_IDX)
+                up = max(max(r.upper[i] for i in H_IDX), 2.0 * he)
+                for i in H_IDX:
+                    r.upper[i] = up
+            if r.p0:
+                p0 = max(r.p0[i] for i in H_IDX)
+                for i in H_IDX:
+                    r.p0[i] = p0
+
     def adopt_curve(self, curve: HeatingCurve) -> None:
-        """Neue Heizkurve übernehmen und die Heizwirkung so umrechnen, dass h·φ gleich bleibt."""
+        """Neue Heizkurve übernehmen und die Heizwirkung so umrechnen, dass h·φ gleich bleibt.
+
+        Gekoppelt (Vorlauf gemessen) nicht: h ist dann am gemessenen Vorlauf gelernt, eine andere Kurve ändert φ
+        schon selbst – umgerechnet würde der Kesselwechsel doppelt zählen. curve_ref bleibt die Kurve, zu der die
+        Startwerte passen (Neustart, Entkoppeln)."""
         ref = (curve.tvl_at_m10, curve.tvl_at_p15)
-        if ref != self.curve_ref:
+        if not self.coupled and ref != self.curve_ref:
             old = HeatingCurve(tvl_at_m10=self.curve_ref[0], tvl_at_p15=self.curve_ref[1])
             f = curve_rescale(old, curve)
             # erst ab 2 % umrechnen: die gelernte Kurve wandert mit jeder Messung ein wenig
@@ -304,6 +366,7 @@ class ZoneLearner:
         return {
             "best": self.best, "samples": self.samples, "heat_samples": self.heat_samples,
             "resid_var": self.resid_var, "last_ts": self.last_ts, "curve_ref": list(self.curve_ref),
+            "coupled": self.coupled,
             "cands": [{"k_ma": c.k_ma, "valve_exp": c.valve_exp, "theta": c.rls.theta, "P": c.rls.P,
                        "score": c.score, "n": c.n, "w": c.w,
                        "state": None if c.state is None else {"t": c.state.t, "tm": c.state.tm, "q": list(c.state.q)}}
@@ -352,6 +415,9 @@ class ZoneLearner:
                     new = HeatingCurve(tvl_at_m10=ref_t[0], tvl_at_p15=ref_t[1])
                     self.rescale_heat(curve_rescale(old, new), estimates=False)
                     self.curve_ref = ref_t
+            self.coupled = raw.get("coupled") is True
+            if self.coupled:
+                self._sym_bounds()
         except (KeyError, TypeError, ValueError):
             return
 

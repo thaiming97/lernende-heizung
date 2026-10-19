@@ -55,7 +55,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Heating
         "tueren_offen": {"schalter": c.doors_open, "seit": c.doors_since, "zuletzt_offen": c.doors_last_ts},
         "aussen": {"jetzt": c.t_out, "mittel_24h": c.t_out_mean24, "fusion": c.fusion.export()},
         "vorlauf": {
-            "jetzt": c.t_supply, "gemessen": c.supply.measured(now), "kessel_kalt": c.supply.heat_missing(now),
+            "jetzt": c.t_supply, "gemessen": c.supply.measured(now), "kessel_kalt": c.supply.heat_missing(now), "kessel_meldung": c.supply.heat_alarm(now),
             "kurve": asdict(c.curve), "lerner": c.supply.export(), "nachtabsenkung": c.supply.night_setback(),
         },
         "sonne": {"skala": c.sun.scale, "n": c.sun.n, "jetzt_fassaden": c.sun_now},

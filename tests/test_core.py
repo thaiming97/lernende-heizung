@@ -28,6 +28,7 @@ from custom_components.lernende_heizung.core.model import (
     Inputs,
     ZoneParams,
     ZoneState,
+    anchor_weights,
     effective_valve,
     radiator_factor,
     step,
@@ -296,6 +297,54 @@ def test_rls_bounds_do_not_drive_other_parameters_away():
     assert math.sqrt(worst) < 0.22, math.sqrt(worst)  # Rauschboden ≈ 0,17 K/h
     assert r.theta[1] < 0.05  # Nachbar-Kopplung bleibt plausibel (wahr 0,007; vorher 0,3 = Anschlag)
     assert all(0.0 <= t <= u for t, u in zip(r.theta, r.upper))
+
+
+def _set_h(L: ZoneLearner, h: tuple[float, float, float]) -> None:
+    for c in L.cands:
+        c.rls.theta[6:9] = list(h)
+
+
+def test_coupled_anchors_keep_current_effect_and_stay_together():
+    """Live 19.10.: frei gelernt Wohnen h 2,3/1,7/6,0 – bei 0 °C nur halb so viel Heizwirkung wie bei +10 °C, obwohl
+    der Vorlauf (gemessen, in φ) dann höher ist. Gekoppelt: alle Anker gleich, für die aktuelle Außentemperatur
+    unverändert; Lernschritte halten sie zusammen, Neustart behält es, die Kurve rechnet h nicht mehr um."""
+    L = ZoneLearner(ZoneParams(h=(1.5, 1.5, 1.5)))
+    _set_h(L, (2.28, 1.73, 6.04))
+    eff = lambda p, to: sum(h * w for h, w in zip(p.h, anchor_weights(to)))  # noqa: E731
+    before = eff(L.params(), 9.7)
+    L.set_coupled(True, 9.7)
+    p = L.params()
+    assert math.isclose(eff(p, 9.7), before, rel_tol=1e-9)
+    assert p.h[0] == p.h[1] == p.h[2]
+    assert all(c.rls.upper[6] >= 2 * c.rls.theta[6] for c in L.cands)  # Grenze schneidet die Kopplung nicht ab
+    # Lernen mit Heizen bei 5 °C (Anker 0 und +10 je zur Hälfte) – die Anker bleiben beieinander
+    rnd = random.Random(3)
+    ts, T = 0.0, 21.0
+    x = Inputs(t_out=5.0, t_nbr=21.0, t_supply=33.0)
+    for k in range(400):
+        v = 1.0 if (k // 8) % 2 else 0.0
+        T += 0.25 * (0.4 * v - 0.08 + rnd.gauss(0, 0.02))
+        L.add(ts, T, x, v)
+        ts += 300
+    h = L.params().h
+    assert max(h) - min(h) < 0.02 * max(h), h
+    # Neustart: gekoppelt bleibt gekoppelt
+    L2 = ZoneLearner(ZoneParams(h=(1.5, 1.5, 1.5)))
+    L2.restore(copy.deepcopy(L.export()))
+    assert L2.coupled and L2.params().h == L.params().h
+    # Kessel fährt anders: h bleibt (φ rechnet mit dem gemessenen Vorlauf)
+    ref = L2.curve_ref
+    L2.adopt_curve(HeatingCurve(tvl_at_m10=45.0, tvl_at_p15=30.0))
+    assert L2.params().h == L.params().h and L2.curve_ref == ref
+
+
+def test_uncoupled_learner_unchanged_without_supply_sensor():
+    """Ohne Vorlauffühler bleibt alles wie bisher: Anker frei, Kurvenwechsel rechnet h um."""
+    L = ZoneLearner(ZoneParams(h=(1.5, 1.5, 1.5)))
+    assert not L.coupled
+    L.adopt_curve(HeatingCurve(tvl_at_m10=45.0, tvl_at_p15=30.0))
+    assert L.params().h[1] > 1.5
+    assert "coupled" in L.export() and L.export()["coupled"] is False
 
 
 def test_model_error_not_dominated_by_first_sample():
@@ -659,6 +708,57 @@ def test_supply_curve_slope_stays_physical():
     sl2 = SupplyLearner()
     sl2.restore(raw)
     assert sl2.b <= 0.0 and math.isclose(sl2.b, sl.b) and math.isclose(sl2.a, sl.a)
+
+
+def _learned_night_setback() -> tuple[SupplyLearner, float]:
+    """Gerade + Stundenversatz gelernt wie live: tags Rohr ~31 °C, 23–06 Uhr Kessel-Absenkung auf ~26,5 °C."""
+    sl = SupplyLearner()
+    rnd = random.Random(7)
+    ts = 0.0
+    for _ in range(6 * 288):
+        hour = int(ts // 3600) % 24
+        tout = 8 + rnd.uniform(-3, 3)
+        pipe = 33.4 - 0.3 * tout - (4.5 if hour >= 23 or hour < 6 else 0.0)
+        sl.update(ts, pipe, tout, 1.0, t_room=21.0, hour=hour)
+        ts += 300
+    return sl, ts
+
+
+def test_supply_night_setback_pipe_counts_as_flow():
+    """Live 18./19.10.: nachts Rohr 25–26 °C bei 21 °C im kühlsten Raum – unter den 5 K, die sonst „es fließt“
+    bedeuten. Passt es zum gelernten Vorlauf der Stunde, ist es Vorlauf: kein „Rohr kalt“ (Lernpause), kein
+    „Kessel kalt“. Ruhendes Wasser (Rohr ≈ Raum) bleibt kalt."""
+    sl, ts = _learned_night_setback()
+    day0 = (ts // 86400 + 1) * 86400
+    t = day0 + 2 * 3600  # 02 Uhr
+    sl.update(t - 1500, 21.3, 8.0, 0.0, t_room=21.0, hour=1)  # Ventil vorher zu
+    for k in range(8):
+        sl.update(t + k * 300, 25.2, 8.0, 1.0, t_room=21.0, hour=2)
+    t_end = t + 7 * 300
+    assert sl.measured(t_end) == 27.2
+    assert not sl.pipe_cold(t_end) and not sl.heat_missing(t_end)
+    # Tagsüber zählt dieselbe Rohrtemperatur nicht: zum üblichen Vorlauf der Stunde fehlen über 3 K
+    t2 = day0 + 12 * 3600
+    sl.update(t2 - 1500, 21.3, 8.0, 0.0, t_room=21.0, hour=11)
+    for k in range(6):
+        sl.update(t2 + k * 300, 25.2, 8.0, 0.2, t_room=21.0, hour=12)
+    assert sl.pipe_cold(t2 + 5 * 300)
+
+
+def test_supply_short_cold_pipe_is_no_alarm():
+    """Beginn der Nachtabsenkung (live 15.10./18.10.): Rohr knapp 1 h fast auf Raumtemperatur trotz offenem Ventil.
+    Das Modell rechnet sofort mit kaltem Vorlauf, gemeldet wird „Kessel liefert keine Wärme“ erst nach ALARM_S."""
+    sl, ts = _learned_night_setback()
+    t = (ts // 86400 + 1) * 86400 + 23 * 3600
+    sl.update(t - 2400, 21.3, 8.0, 0.0, t_room=21.0, hour=22)
+    for k in range(20):  # 100 min: erst 40 min warm, dann Rohr kalt
+        pipe = 26.0 if k < 8 else 23.0
+        sl.update(t - 1200 + k * 300, pipe, 8.0, 0.8, t_room=21.0, hour=23)
+    t_cold = t - 1200 + 8 * 300
+    assert sl.heat_missing(t_cold + 300) and not sl.heat_alarm(t_cold + 300)
+    assert sl.heat_alarm(t_cold + sl.ALARM_S + 300)
+    sl.update(t_cold + sl.ALARM_S + 600, 25.5, 8.0, 0.8, t_room=21.0, hour=0)  # Vorlauf wieder da
+    assert not sl.heat_missing(t_cold + sl.ALARM_S + 600) and not sl.heat_alarm(t_cold + sl.ALARM_S + 600)
 
 
 def test_supply_learner_needs_room_temperature():

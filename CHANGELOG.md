@@ -4,6 +4,26 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.10.0 – 2026-10-19
+
+- **Heizwirkung gilt für jede Außentemperatur gleich, sobald der Vorlauf gemessen wird.** Bisher lernte die
+  Heizung die Wirkung der Heizkörper getrennt für −10, 0 und +10 °C außen. Das war gedacht, solange der Vorlauf
+  nur geschätzt ist. Mit Vorlauffühler steckt die Außentemperatur aber schon im gemessenen Vorlauf – und die drei
+  Werte passten nur zu dem Wetter, das es gerade gab. Live (nur 4–15 °C außen) hielt das Modell die Heizkörper im
+  Wohnzimmer bei 0 °C für halb so stark wie bei +10 °C, obwohl der Vorlauf dann wärmer ist. Beim ersten Frost hätte
+  es deshalb zu weit aufgedreht. Jetzt gibt es einen Wert. Beim Update übernimmt er die Wirkung, die bei der
+  aktuellen Außentemperatur gilt – die Vorhersage für heute bleibt gleich. Mit den echten Messdaten der letzten
+  elf Tage nachgerechnet: gleich genaue Vorhersage, bei 0 °C passen die Werte jetzt zu den gemessenen
+  Aufheizraten vom letzten Winter. Ohne Vorlauffühler ändert sich nichts.
+- **Nachtabsenkung des Kessels zählt als Vorlauf.** Nachts liegt das Rohr oft nur gut 4 K über der Raumtemperatur
+  (live 25–26 °C). Bisher galt das als „Rohr kalt“: Das Lernen pausierte ausgerechnet nachts, wenn die Ventile
+  offen stehen (bis zu einem Drittel des Tages). Jetzt zählt das Rohr, wenn es zum gelernten Vorlauf dieser Uhrzeit
+  passt. Ruhendes Wasser (Rohr ≈ Raum) zählt weiter nicht.
+- **„Kessel liefert keine Wärme“ erst nach einer Stunde.** Zu Beginn der Nachtabsenkung bleibt das Rohr oft knapp
+  eine Stunde fast kalt. Das Modell rechnet dann wie bisher sofort mit kaltem Vorlauf, in der Problemliste und auf
+  dem Vorlauf-Sensor steht es aber erst, wenn es eine Stunde anhält. Davor zeigt der Rohrfühler-Status „Kessel
+  liefert gerade kaum Wärme“.
+
 ## 0.9.1 – 2026-10-11
 
 - **Raumsensor fällt aus: nach der Haltezeit die übliche Öffnung.** Nach einer Stunde ohne Raumwert stellt die

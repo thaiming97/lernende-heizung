@@ -196,7 +196,7 @@ class SupplySensor(HubEntity, SensorEntity):
                           f"{c.curve.supply(10):.0f} °C bei +10 °C"),
             "heizkurve_gelernt": s.curve_params() is not None,
             "messungen": s.n,
-            "kessel_liefert_waerme": not s.heat_missing(now),
+            "kessel_liefert_waerme": not s.heat_alarm(now),  # kurze Aussetzer (Beginn Nachtabsenkung) nicht melden
         }
         if c.supply_note is not None:  # Vorlauffühler eingetragen
             attrs["rohrfuehler"] = None if c.supply_pipe is None else round(c.supply_pipe, 1)

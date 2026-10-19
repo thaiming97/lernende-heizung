@@ -861,6 +861,7 @@ async def test_model_uses_measured_supply_once_curve_learned(hass: HomeAssistant
         feed()
         await coord.async_refresh()
     assert 0 < coord.supply.n < 30
+    assert not coord.zones["bad"].learner.coupled  # Heizwirkung je Außentemperatur, solange die Kurve angenommen ist
     assert coord.supply.measured(dt_util.utcnow().timestamp()) == 31.0
     assert coord.t_supply == coord.curve.supply(13.0, dt_util.now().hour)  # Modell: noch Heizkurve
     sup = hass.states.get("sensor.vorlauf_lh")
@@ -870,6 +871,11 @@ async def test_model_uses_measured_supply_once_curve_learned(hass: HomeAssistant
         feed()
         await coord.async_refresh()
     assert coord.supply.curve_params() is not None and coord.t_supply == 31.0
+    lz = coord.zones["bad"].learner
+    hs = lz.params().h
+    assert lz.coupled and max(hs) - min(hs) < 0.01 * max(hs), hs  # Vorlauf gemessen → ein h
+    ch = coord.zones["bad"].controller.params.h  # Regler bekam beim Umschalten sofort die gekoppelten Werte
+    assert max(ch) - min(ch) < 0.01 * max(ch), ch
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 

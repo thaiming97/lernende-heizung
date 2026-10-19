@@ -210,10 +210,13 @@ class SupplyLearner:
     last_valid_ts: float | None = None
     no_heat: bool = False
     no_heat_ts: float = 0.0
+    no_heat_since: float | None = None  # seit wann ohne Unterbrechung „Kessel kalt“
     cold_ts: float | None = None  # zuletzt: Ventil offen, Rohr aber kalt (unklar, ob Wärme ankommt)
 
     FLOW_MIN_K = 5.0  # Rohr so viel wärmer als der Raum → es fließt Heizwasser
     COLD_K = 3.0  # darunter trotz offenem Ventil: Kessel liefert nichts
+    EXPECT_TOL_K = 3.0  # so weit unter dem üblichen Vorlauf der Stunde zählt das Rohr noch als Vorlauf
+    ALARM_S = 3600  # „Kessel liefert keine Wärme“ erst melden, wenn es so lange anhält
     OPEN_MIN = 0.08  # ab dieser Ventilöffnung zählt der Rohrfühler als Vorlauf
     COLD_OPEN_MIN = 0.3  # „Kessel kalt“ nur bei weit offenem Ventil
     HOUR_MIN_N = 5
@@ -232,6 +235,17 @@ class SupplyLearner:
     def heat_missing(self, ts: float) -> bool:
         """Kessel lieferte zuletzt (≤ 2 h) trotz offenem Ventil keine Wärme."""
         return self.no_heat and ts - self.no_heat_ts < 7200
+
+    def heat_alarm(self, ts: float) -> bool:
+        """Kessel liefert schon länger (ALARM_S) keine Wärme – erst das ist eine Meldung wert. Beim Übergang in
+        die Nachtabsenkung bleibt das Rohr oft kurz kalt (live 15.10. und 18.10. je knapp 1 h)."""
+        return self.heat_missing(ts) and self.no_heat_since is not None and ts - self.no_heat_since >= self.ALARM_S
+
+    def expected(self, t_out: float, hour: int | None) -> float | None:
+        """Üblicher Vorlauf zu dieser Stunde (gelernte Gerade + Stundenversatz) – None, solange unbekannt."""
+        if hour is None or self.n < self.LINE_SET_N or self.hour_n[hour % 24] < self.HOUR_MIN_N:
+            return None
+        return self.a + self.b * t_out + self.hour_off[hour % 24]
 
     def pipe_cold(self, ts: float) -> bool:
         """Ventil seit 20 min offen, Rohr aber kaum wärmer als der Raum – ohne eindeutigen Befund
@@ -295,18 +309,26 @@ class SupplyLearner:
         # „Kessel kalt“ erst, wenn der Fühler schon einmal echten Vorlauf gezeigt hat – sonst sitzt
         # er womöglich gar nicht am Rohr, und das Modell bekäme Vorlauf ≈ Raumtemperatur
         if pipe - t_room < self.COLD_K and wide_long and self.n > 0:
+            if not self.no_heat or self.no_heat_since is None:
+                self.no_heat_since = ts
             self.no_heat, self.no_heat_ts = True, ts
             self.last_valid, self.last_valid_ts = pipe, ts  # tatsächlich kommt kaum Wärme an
             self.cold_ts = None
             return
-        if pipe - t_room < self.FLOW_MIN_K:
+        y = pipe + pipe_offset
+        h = None if hour is None else hour % 24
+        # In der Nachtabsenkung des Kessels liegt das Rohr nur gut 4 K über dem Raum (live: 25–26 °C bei 21 °C).
+        # Passt es zum üblichen Vorlauf dieser Stunde, fließt trotzdem Heizwasser – bisher galt das als „Rohr kalt“,
+        # und das Lernen pausierte ausgerechnet nachts, wenn die Ventile offen stehen.
+        expected = self.expected(t_out, h)
+        night_flow = expected is not None and pipe - t_room >= self.COLD_K and y >= expected - self.EXPECT_TOL_K
+        if pipe - t_room < self.FLOW_MIN_K and not night_flow:
             self.cold_ts = ts
             return
         self.no_heat = False
+        self.no_heat_since = None
         self.cold_ts = None
-        y = pipe + pipe_offset
         self.last_valid, self.last_valid_ts = y, ts
-        h = None if hour is None else hour % 24
         # Messungen aus der Absenkung zählen nicht für die Gerade (die steht für den Normalbetrieb), nur für den
         # Versatz ihrer Stunde. Sonst zieht jede Nachtmessung sie nach unten – mit dem Fühler über den ganzen
         # Strang gibt es nachts viele davon –, die Kurve wandert, und die Heizwirkung wird jedes Mal umgerechnet

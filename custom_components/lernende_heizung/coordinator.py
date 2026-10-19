@@ -824,8 +824,10 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return "Fühler meldet sich nicht"
         if not szs:
             return "keine Zone gewählt (Konfigurieren → Vorlauffühler)"
-        if s.heat_missing(now_ts):
+        if s.heat_alarm(now_ts):
             return "Kessel liefert keine Wärme – Rohr kalt trotz offenem Ventil"
+        if s.heat_missing(now_ts):
+            return "Rohr kalt trotz offenem Ventil – Kessel liefert gerade kaum Wärme (z. B. Beginn der Nachtabsenkung)"
         if s.pipe_cold(now_ts) and s.n == 0:
             return "zählt nicht – Rohr bleibt kalt trotz offenem Ventil: sitzt der Fühler am Vorlaufrohr?"
         if s.measured(now_ts) is not None:
@@ -844,13 +846,17 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _update_curve(self) -> None:
         """Heizkurve aus dem Vorlauffühler übernehmen (sobald genug gelernt); die Lerner rechnen
-        ihre Heizwirkung dabei um, damit das bisher Gelernte gültig bleibt."""
+        ihre Heizwirkung dabei um, damit das bisher Gelernte gültig bleibt. Ab dann ist der Vorlauf gemessen,
+        und die Heizwirkung gilt für alle Außentemperaturen gleich (gekoppelte Anker)."""
         cp = self.supply.curve_params()
         curve = HeatingCurve() if cp is None else HeatingCurve(tvl_at_m10=cp[0], tvl_at_p15=cp[1], hour_offset=cp[2])
+        t_ref = self.t_out_mean24 if self.t_out_mean24 is not None else self.t_out
         for z in self.zones.values():
-            before = z.learner.curve_ref
-            z.learner.adopt_curve(curve)
-            if z.learner.curve_ref != before:
+            before = (z.learner.curve_ref, z.learner.coupled)
+            z.learner.adopt_curve(curve)  # zuerst: Startwerte passen zur angenommenen Kurve, einmal umrechnen
+            if z.learner.coupled != (cp is not None):
+                z.learner.set_coupled(cp is not None, t_ref if t_ref is not None else 5.0)
+            if (z.learner.curve_ref, z.learner.coupled) != before:
                 z.controller.params = z.learner.params()
             z.controller.curve = curve
             if z.controller.hour_of is None:
@@ -899,7 +905,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 paused = z.block_reason or "kurz pausiert"
         rmse = z.learner.rmse()
         sun3 = self._sun_gain(z, now_ts) if not summer else 0.0
-        heat_missing = self.supply.heat_missing(now_ts) and not summer
+        heat_missing = self.supply.heat_alarm(now_ts) and not summer  # Meldung erst nach ALARM_S
         sit = Situation(
             reason=d.reason if d else "aus", temp=z.temp, setpoint=tg.setpoint, valve_pct=valve_now, want_pct=want,
             fmt_time=_hhmm, next_change=nxt, temp_at_change=t_at_change,
