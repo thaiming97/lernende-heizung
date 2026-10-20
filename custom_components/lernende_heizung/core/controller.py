@@ -129,7 +129,8 @@ class ZoneController:
     def observe(self, ts: float, t_meas: float, x: Inputs, u_applied: float, freeze_d: bool = False) -> None:
         """Messwert einarbeiten. ts in Sekunden, u_applied = wirksame Öffnung seit dem letzten Takt.
 
-        freeze_d: Störgröße nicht nachführen (Fenster offen bzw. kurz danach)."""
+        freeze_d: Störgröße nicht nachführen (Fenster offen bzw. kurz danach), sondern wie im Plan abklingen lassen –
+        gehalten bliebe z. B. Duschwärme stundenlang stehen und hielte das Ventil zu (live 20.10.)."""
         if self.state is None or self.last_ts is None or ts - self.last_ts > 6 * 3600:
             self.state = ZoneState(t_meas, t_meas - 0.2, [0.0, 0.0, 0.0])
             self.t_filt = t_meas
@@ -149,6 +150,8 @@ class ZoneController:
             k = 1.0 - math.exp(-self.cfg.obs_gain * dt)
             self.d += k * innov / max(dt, 1e-3)
             self.d = max(-self.cfg.obs_limit, min(self.cfg.obs_limit, self.d))
+        elif freeze_d:
+            self.d *= math.exp(-dt / max(self.cfg.d_tau_h, 1e-3))
         # Masse/Heizkörper mit gemessener Temperatur fortschreiben
         self.state = step(self.params, self.state, x, u_applied, dt, self.curve, self.d, t_measured=self.t_filt)
         # Vorhersage für den nächsten Takt (gleiche Taktlänge angenommen)

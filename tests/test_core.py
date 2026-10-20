@@ -216,6 +216,17 @@ def test_disturbance_frozen_while_window_open():
     assert c.d < -0.1
 
 
+def test_frozen_disturbance_fades():
+    """Eingefroren klingt d wie im Plan ab (τ 2 h) – gehaltene Duschwärme hielt live das Bad-Ventil zu (20.10.)."""
+    c = ZoneController(ZoneParams())
+    x = Inputs(t_out=0.0, t_nbr=21.0)
+    c.observe(0.0, 23.3, x, 0.0)
+    c.d = 0.16
+    for k in range(1, 25):  # 2 h eingefroren
+        c.observe(k * 300.0, 23.3 - 0.02 * k, x, 0.0, freeze_d=True)
+    assert math.isclose(c.d, 0.16 * math.exp(-1.0), rel_tol=1e-6)
+
+
 def test_plan_disturbance_fades():
     p = ZoneParams(k_am=0.05, k_ma=0.02, k_n=0.0, k_o=0.003, h=(1.5, 1.5, 1.5))
     x = Inputs(t_out=5.0)

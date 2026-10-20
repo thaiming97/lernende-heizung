@@ -4,6 +4,17 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.10.1 – 2026-10-20
+
+- **„Türen offen“ hält keine alte Zusatzwärme mehr fest.** Bisher fror der Schalter die geschätzte Zusatzwärme
+  (Duschen, Kochen, Sonne …) auf ihrem letzten Wert ein. Live am 20.10. war das gerade die Duschwärme im Bad: Die
+  Heizung rechnete stundenlang mit Wärme, die es nicht mehr gab, ließ das Ventil fast zu, und das Bad fiel von 23,3
+  auf 22,7 °C. Jetzt passt sich die Zusatzwärme bei offenen Türen weiter an die Messung an – so merkt die Heizung,
+  wenn ein Raum auskühlt (nachgerechnet mit diesem Morgen: Bad-Ventil 67–100 % statt 4–24 %). Gelernt wird bei
+  offenen Türen weiterhin nichts.
+- **Eingefrorene Zusatzwärme klingt ab.** Beim offenen Fenster und in der Stunde nach dem Türen-Schließen bleibt die
+  Zusatzwärme weiter eingefroren, klingt aber wie im Plan über rund zwei Stunden ab, statt stehen zu bleiben.
+
 ## 0.10.0 – 2026-10-19
 
 - **Heizwirkung gilt für jede Außentemperatur gleich, sobald der Vorlauf gemessen wird.** Bisher lernte die

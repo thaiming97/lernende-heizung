@@ -195,9 +195,21 @@ async def test_doors_open_pauses_learning(hass: HomeAssistant, freezer) -> None:
     assert hass.states.get("sensor.bad_status_lh").state == "komfort"  # heizt weiter (kein Fenster-Betrieb)
     assert coord.zones["bad"].valve_pct > 0
     assert hass.states.get("switch.tueren_offen_lh").attributes["seit"]
+    frozen: list[bool] = []
+    ctl = coord.zones["bad"].controller
+    orig_observe = ctl.observe
+
+    def observe(*a, freeze_d=False, **kw):
+        frozen.append(freeze_d)
+        return orig_observe(*a, freeze_d=freeze_d, **kw)
+
+    ctl.observe = observe
+    await _tick(hass, freezer, coord, 300)
+    assert frozen and not frozen[-1]  # Türen offen: Störgröße führt nach (Modell stimmt dann nicht)
     await call("turn_off")
     await _tick(hass, freezer, coord, 30 * 60)
     assert "Türen" in pause()  # Luft braucht nach dem Schließen noch eine Weile
+    assert frozen[-1]  # … und so lange ist die Störgröße eingefroren (klingt ab)
     await _tick(hass, freezer, coord, 31 * 60)
     assert "Türen" not in (pause() or "")  # (Test-TRV übernimmt Stellungen nicht → „Ventil unsicher“ ist hier normal)
     # übersteht einen Neustart

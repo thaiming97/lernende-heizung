@@ -746,9 +746,11 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 z.controller.params = z.learner.params()
                 z.params_ts = now_ts
             if z.temp is not None:
-                # Fenster offen (und kurz danach) bzw. Türen offen: nicht als Störgröße lernen – die wäre
+                # Fenster offen (und kurz danach) bzw. Türen gerade zu: nicht als Störgröße lernen – die wäre
                 # nach dem Schließen falsch und klänge erst über Stunden ab
-                freeze = now_ts - z.last_window_ts < WINDOW_LEARN_PAUSE_S or doors_recent
+                # Türen noch offen: d führt nach (Modell stimmt dann nicht; eingefrorene Duschwärme hielt am 20.10. das
+                # Bad-Ventil zu, 23,3 → 22,7). Eingefroren klingt d ab.
+                freeze = now_ts - z.last_window_ts < WINDOW_LEARN_PAUSE_S or (doors_recent and not doors)
                 z.controller.observe(now_ts, z.temp, x, effective_valve(valve_frac, z.controller.params.valve_exp), freeze_d=freeze)
             z.energy_kwh += heating_power_kw(z.controller.params, z.controller.state) * dt_h if z.controller.state else 0.0
 
