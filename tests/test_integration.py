@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
@@ -709,6 +709,11 @@ async def test_vacation_with_and_without_return(hass: HomeAssistant, freezer) ->
     assert hass.states.get(cid).attributes["temperature"] == 23.5
     assert hass.states.get(presence).attributes["urlaub_absenken"] is False
     assert "Absenken lohnt sich nicht" in hass.states.get(_eid(hass, entry, "sensor", "bad_explain")).state
+    # Rückkehrzeit wieder weg → unbegrenzt abgesenkt, die alte Entscheidung „warm halten“ gilt nicht mehr
+    coord.return_at = None
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.vac_setback is None and hass.states.get(cid).attributes["temperature"] == 17.0
     # Rückkehr in 6 Wochen: lohnt sich → abgesenkt, spätester Vorheizstart vor der Rückkehr
     back = dt_util.utcnow() + timedelta(days=42)
     await set_return(back)
@@ -727,6 +732,15 @@ async def test_vacation_with_and_without_return(hass: HomeAssistant, freezer) ->
     assert hass.states.get(cid).attributes["temperature"] == 23.5
     assert hass.states.get(_eid(hass, entry, "sensor", "bad_status")).state == "vorheizen"
     assert hass.states.get(_eid(hass, entry, "sensor", "bad_explain")).state.startswith("Heizt vor: 23,5 °C ab ")
+    # Vorheizen zielt auf das, was zur Rückkehr gilt – auch wenn jetzt laut Zeitplan Eco-Zeit ist
+    with patch.object(zone, "schedule", MagicMock(is_comfort=lambda local: local.timestamp() >= back.timestamp())):
+        now_target = coord.target_at(zone, time.time())
+    assert (now_target.setpoint, now_target.comfort) == (23.5, True)
+    # Rückkehr eine Woche später (Flug verschoben): Vorheizen abgebrochen, wieder abgesenkt, neu geplant
+    back += timedelta(days=7)
+    await set_return(back)
+    assert not zone.vac_preheating and hass.states.get(cid).attributes["temperature"] == 17.0
+    assert zone.vac_preheat_ts is not None and time.time() < zone.vac_preheat_ts < back.timestamp()
     # eine Stunde nach der Rückkehr automatisch wieder „Zuhause“, Urlaubsentscheidung vergessen
     freezer.move_to(back + timedelta(hours=1, minutes=5))
     await coord.async_refresh()

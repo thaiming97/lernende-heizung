@@ -4,6 +4,15 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.11.1 – 2026-10-27
+
+- **Urlaub: Vorheizen zielt gleich auf die Temperatur zur Rückkehr.** In 0.11.0 galt ab dem Vorheizstart der
+  normale Zeitplan von jetzt. Fiel der Start in eine Eco-Zeit (nachts oder werktags tagsüber), hätte die Zone nur
+  bis Eco geheizt und den Rest wieder auf den letzten Drücker geplant – genau das, was am 25.10. zu spät kam.
+- **Rückkehr verschoben:** Lief das Vorheizen schon, bricht es jetzt ab, die Zone senkt wieder ab, und der Start
+  wird für die neue Rückkehrzeit neu gerechnet. Bisher heizte sie bis zur neuen Rückkehr durch.
+- Wird die Rückkehrzeit gelöscht, gilt wieder „bis auf Weiteres absenken“ statt der alten Entscheidung.
+
 ## 0.11.0 – 2026-10-26
 
 - **Urlaub: Die Heizung prüft, ob sich das Absenken überhaupt lohnt.** Mit eingetragener Rückkehrzeit rechnet sie

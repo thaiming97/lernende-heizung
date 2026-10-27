@@ -65,9 +65,9 @@ Tagen kaum aus, gespart wird wenig, und das Wiederaufheizen dauert lange. Spart 
 eingerechnet) weniger als 10 % der Wärme fürs Warmhalten, bleibt es warm – die Erklärung sagt das
 („Urlaub: Absenken lohnt sich nicht …“), die Anwesenheits-Auswahl zeigt `urlaub_absenken` und die
 geschätzte Ersparnis. Lohnt es sich, gilt die Urlaubstemperatur, und ab dem spätesten sicheren Start
-heizt die Zone mit voller Leistung vor (vorsichtig gerechnet, damit es zur Rückkehr warm ist). Dieser
-Start wird stündlich mit der tatsächlichen Raumtemperatur nachgerechnet und steht im Attribut
-`urlaub` der Erklärung. Ohne Rückkehrzeit wird bis auf Weiteres abgesenkt; „Abwesend“ senkt immer ab.
+heizt die Zone mit voller Leistung auf die Temperatur vor, die zur Rückkehr gilt (vorsichtig gerechnet,
+damit es dann warm ist). Dieser Start wird stündlich mit der tatsächlichen Raumtemperatur nachgerechnet
+und steht im Attribut `urlaub` der Erklärung; wird die Rückkehr verschoben, plant die Heizung neu. Ohne Rückkehrzeit wird bis auf Weiteres abgesenkt; „Abwesend“ senkt immer ab.
 
 ## Besuch, der es wärmer mag („Sofi da“)
 

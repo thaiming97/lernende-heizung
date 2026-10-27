@@ -214,7 +214,7 @@ class Zone:
     last_ext_ts: float = 0.0
     controlling: bool = False
     vac_preheat_ts: float | None = None  # Urlaub: spätester Start mit voller Leistung
-    vac_preheating: bool = False  # Urlaub: Vorheizen für die Rückkehr läuft (ab da gilt der Zeitplan)
+    vac_preheating: bool = False  # Urlaub: Vorheizen für die Rückkehr läuft (ab da gilt, was zur Rückkehr gilt)
     valve_frac: float | None = None  # wirksame Stellung 0..1 (gestellt bzw. beobachtet), None = unbekannt
     primary_missing: bool = False
     info: dict = field(default_factory=dict)  # „was denkt die Regelung" (Sensor Erklärung)
@@ -494,10 +494,14 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return Target(z.away, False)
         # Urlaub: Abwesenheitstemperatur bis zur Rückkehr (ohne Rückkehrzeit unbegrenzt); danach gilt wieder
         # der Zeitplan. Mit Rückkehrzeit nur, wenn sich das Absenken lohnt, und nur bis zum Vorheizen
-        # (_update_vacation): ab dann gilt der Zeitplan schon jetzt – der Regler heizt mit voller Leistung.
-        if (self.presence == PRESENCE_VACATION and not sofi and self.vac_setback is not False and not z.vac_preheating
-                and (self.return_at is None or ts < self.return_at.timestamp())):
-            return Target(z.away, False)
+        # (_update_vacation): ab dann gilt schon das, was zur Rückkehr gilt – der Regler heizt mit voller Leistung.
+        # Nicht der Zeitplan von jetzt: in dessen Eco-Zeit (nachts, werktags tagsüber) würde er nur bis Eco heizen
+        # und den Rest wieder „just in time“ planen – genau das kam am 25.10. zu spät.
+        if self.presence == PRESENCE_VACATION and not sofi and (self.return_at is None or ts < self.return_at.timestamp()):
+            if z.vac_preheating and self.return_at is not None:
+                return self.target_at(z, self.return_at.timestamp() + 60)
+            if self.vac_setback is not False:
+                return Target(z.away, False)
         if manual is not None:
             return Target(manual, True)
         comfort = self.comfort_of(z)
@@ -920,15 +924,20 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _update_vacation(self, now_ts: float) -> None:
         """Urlaub mit Rückkehrzeit: beim Eintragen der Rückkehr einmal entscheiden, ob sich das Absenken lohnt
         (core.vacation); danach stündlich den spätesten Vorheizstart nachrechnen – mit dem, wie weit die Räume
-        wirklich ausgekühlt sind. Ist er erreicht, gilt für die Zone der Zeitplan: volle Leistung bis warm."""
+        wirklich ausgekühlt sind. Ist er erreicht, gilt für die Zone, was zur Rückkehr gilt: volle Leistung bis warm."""
         if self.presence != PRESENCE_VACATION:
             if self.vac_key is not None:
                 self._vac_reset()
             return
         if not self.vac_active(now_ts):
+            if self.return_at is None and self.vac_key is not None:
+                self._vac_reset()  # Rückkehrzeit weg → unbegrenzt absenken, nicht nach alter Entscheidung warm halten
             return
         ret = self.return_at.timestamp()  # type: ignore[union-attr]
         new = ret != self.vac_key
+        if new:  # andere Rückkehrzeit (z. B. Flug verschoben): ein schon laufendes Vorheizen gilt nicht mehr
+            for z in self.zones.values():
+                z.vac_preheat_ts, z.vac_preheating = None, False
         if new or now_ts - self.vac_ts >= VACATION_REPLAN_S:
             zones = [z for z in self.zones.values()
                      if z.controller.state is not None and not z.hvac_off and not self.sofi_active(z) and not z.vac_preheating]
@@ -948,7 +957,6 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.info("Urlaub bis %s: Absenken %s (spart %.0f %% = %.1f kWh)", self.return_at,
                                  "lohnt sich" if self.vac_setback else "lohnt sich nicht", 100 * self.vac_frac, self.vac_kwh)
                     for z in self.zones.values():
-                        z.vac_preheating = False
                         z.controller.last_plan_ts = None
                 for z in zones:
                     z.vac_preheat_ts = plans[z.zid].preheat_ts
