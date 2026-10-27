@@ -30,6 +30,15 @@ class PresenceSelect(HubEntity, SelectEntity):
     def current_option(self) -> str:
         return self.coordinator.presence
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Urlaub mit Rückkehr: hat sich das Absenken gelohnt? (gemeinsam für alle Räume entschieden)"""
+        c = self.coordinator
+        if not c.vac_active(time.time()) or c.vac_setback is None:
+            return {}
+        return {"urlaub_absenken": c.vac_setback, "urlaub_ersparnis_prozent": round(100 * (c.vac_frac or 0.0)),
+                "urlaub_ersparnis_kwh": round(c.vac_kwh or 0.0, 1)}
+
     async def async_select_option(self, option: str) -> None:
         self.coordinator.presence = option
         ret = self.coordinator.return_at

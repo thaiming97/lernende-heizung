@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import time
 from unittest.mock import patch
 
 from homeassistant import config_entries
@@ -698,17 +699,39 @@ async def test_vacation_with_and_without_return(hass: HomeAssistant, freezer) ->
     await choose("urlaub")
     assert coord.presence == "urlaub" and coord.return_at is None
     assert hass.states.get(cid).attributes["temperature"] == 17.0  # Urlaub ohne Rückkehr: abgesenkt
-    # Rückkehr in 2 Tagen eintragen: bis dahin abgesenkt, der Plan sieht den Komfort danach
-    back = dt_util.utcnow() + timedelta(days=2)
-    await hass.services.async_call("datetime", "set_value", {"entity_id": ret_eid, "datetime": back}, blocking=True)
-    await hass.async_block_till_done()
+    # Rückkehr in 12 h: Absenken spart in der trägen Wohnung kaum etwas → bleibt warm, die Erklärung sagt warum
+    async def set_return(back) -> None:
+        await hass.services.async_call("datetime", "set_value", {"entity_id": ret_eid, "datetime": back}, blocking=True)
+        await hass.async_block_till_done()
+
+    await set_return(dt_util.utcnow() + timedelta(hours=12))
+    assert coord.vac_setback is False
+    assert hass.states.get(cid).attributes["temperature"] == 23.5
+    assert hass.states.get(presence).attributes["urlaub_absenken"] is False
+    assert "Absenken lohnt sich nicht" in hass.states.get(_eid(hass, entry, "sensor", "bad_explain")).state
+    # Rückkehr in 6 Wochen: lohnt sich → abgesenkt, spätester Vorheizstart vor der Rückkehr
+    back = dt_util.utcnow() + timedelta(days=42)
+    await set_return(back)
+    zone = coord.zones["bad"]
+    assert coord.vac_setback is True and coord.vac_frac >= 0.1
     assert hass.states.get(cid).attributes["temperature"] == 17.0
-    assert coord.target_at(coord.zones["bad"], back.timestamp() + 60).setpoint == 23.5
-    # eine Stunde nach der Rückkehr automatisch wieder „Zuhause“
+    assert zone.vac_preheat_ts is not None and time.time() < zone.vac_preheat_ts < back.timestamp()
+    assert coord.target_at(zone, back.timestamp() + 60).setpoint == 23.5
+    # Vorheizstart erreicht: ab jetzt gilt der Zeitplan (volle Leistung bis warm), Status „vorheizen“
+    await hass.services.async_call("switch", "turn_on", {"entity_id": _eid(hass, entry, "switch", "bad_active")}, blocking=True)
+    zone.vac_preheat_ts = time.time()
+    freezer.tick(timedelta(minutes=5))
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert zone.vac_preheating
+    assert hass.states.get(cid).attributes["temperature"] == 23.5
+    assert hass.states.get(_eid(hass, entry, "sensor", "bad_status")).state == "vorheizen"
+    assert hass.states.get(_eid(hass, entry, "sensor", "bad_explain")).state.startswith("Heizt vor: 23,5 °C ab ")
+    # eine Stunde nach der Rückkehr automatisch wieder „Zuhause“, Urlaubsentscheidung vergessen
     freezer.move_to(back + timedelta(hours=1, minutes=5))
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord.presence == "zuhause"
+    assert coord.presence == "zuhause" and coord.vac_setback is None and not zone.vac_preheating
     assert hass.states.get(cid).attributes["temperature"] == 23.5
     assert await hass.config_entries.async_unload(entry.entry_id)
 

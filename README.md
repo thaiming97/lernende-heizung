@@ -57,6 +57,18 @@ gestellte Zone bleibt aus. Solange etwas von Hand gilt, steht der Status auf „
 das Thermostat hat die Attribute `manuell` und `manuell_bis`, und die Erklärung beginnt mit
 „Von Hand bis 0 Uhr“.
 
+## Urlaub
+
+Anwesenheit auf „Urlaub“ und die Rückkehrzeit eintragen. Die Heizung rechnet dann mit dem gelernten
+Modell aus, ob sich das Absenken überhaupt lohnt: Eine gut gedämmte, träge Wohnung kühlt in ein paar
+Tagen kaum aus, gespart wird wenig, und das Wiederaufheizen dauert lange. Spart das Absenken (Vorheizen
+eingerechnet) weniger als 10 % der Wärme fürs Warmhalten, bleibt es warm – die Erklärung sagt das
+(„Urlaub: Absenken lohnt sich nicht …“), die Anwesenheits-Auswahl zeigt `urlaub_absenken` und die
+geschätzte Ersparnis. Lohnt es sich, gilt die Urlaubstemperatur, und ab dem spätesten sicheren Start
+heizt die Zone mit voller Leistung vor (vorsichtig gerechnet, damit es zur Rückkehr warm ist). Dieser
+Start wird stündlich mit der tatsächlichen Raumtemperatur nachgerechnet und steht im Attribut
+`urlaub` der Erklärung. Ohne Rückkehrzeit wird bis auf Weiteres abgesenkt; „Abwesend“ senkt immer ab.
+
 ## Besuch, der es wärmer mag („Sofi da“)
 
 Je Zone unter „Konfigurieren“ → Zone bearbeiten eine *Temperatur, wenn Sofi da ist* eintragen

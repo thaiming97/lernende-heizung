@@ -36,6 +36,7 @@ from custom_components.lernende_heizung.core.model import (
 )
 from custom_components.lernende_heizung.core.schedule import ScheduleError, WeekSchedule
 from custom_components.lernende_heizung.core.signals import OutdoorFusion, RoomSensorFilter, SunModel, SupplyLearner
+from custom_components.lernende_heizung.core.vacation import HEAT_RESERVE, VacationPlan, plan_vacation, worth_it
 
 TZ = ZoneInfo("Europe/Berlin")
 NO_SUN = (0.0, 0.0, 0.0)
@@ -242,6 +243,46 @@ def test_plan_disturbance_fades():
         rises.append(plan.t_pred[-1] - 21.0)
     # abklingend: höchstens ~1 K in 12 h; konstant fortgeschrieben wären es mehrere Kelvin
     assert rises[0] < 1.0 < 2.0 < rises[1]
+
+
+WOHNEN = ZoneParams(k_am=0.075, k_ma=0.04, k_n=0.001, k_o=0.006, h=(5.8, 5.8, 5.8), valve_exp=0.35, c_eff_kwh_per_k=2.1)
+CURVE_LIVE = HeatingCurve(tvl_at_m10=37.0, tvl_at_p15=30.0)
+
+
+def _vac(hours: float, t_out: float = 8.0) -> VacationPlan:
+    s = ZoneState(21.75, 21.75, [0.0, 0.0, 0.0])
+    return plan_vacation(WOHNEN, s, CURVE_LIVE, lambda _ts: 12, 0.0, hours * 3600, 21.75, 17.0, lambda _ts: t_out)
+
+
+def test_vacation_setback_only_pays_off_when_long():
+    """Gut gedämmt und träge: übers Wochenende spart Absenken kaum etwas (live 23.–25.10.), erst lange lohnt es."""
+    plans = {h: _vac(h) for h in (12, 60, 168, 1000)}
+    fracs = [plans[h].saving_frac for h in (12, 60, 168, 1000)]
+    assert fracs == sorted(fracs)
+    assert not worth_it([plans[60]])[0]
+    assert worth_it([plans[1000]])[0]
+    assert all(pl.t_min >= 17.0 - 1e-9 for pl in plans.values())
+    assert plans[1000].t_min < 18.0  # lange weg: kühlt bis zur Urlaubstemperatur
+
+
+def test_vacation_preheat_start_is_latest_safe_start():
+    pl = _vac(1000)
+    ret = 1000 * 3600
+    assert 0 < pl.preheat_ts < ret - 24 * 3600  # träge Masse: viele Stunden vorher
+
+    def end_temp(start_ts: float) -> float:
+        heat = ZoneParams(**{**WOHNEN.to_dict(), "h": tuple(h * HEAT_RESERVE for h in WOHNEN.h)})
+        s, ts = ZoneState(21.75, 21.75, [0.0, 0.0, 0.0]), 0.0
+        while ts < ret:
+            x = Inputs(t_out=8.0, t_supply=CURVE_LIVE.supply(8.0, 12))
+            u = 1.0 if ts >= start_ts else 0.0
+            s = step(heat if u else WOHNEN, s, x, u, 0.25, CURVE_LIVE)
+            s = ZoneState(min(21.75, max(17.0, s.t)), s.tm, s.q)
+            ts += 900
+        return s.t
+
+    assert end_temp(pl.preheat_ts) >= 21.65 - 0.01
+    assert end_temp(pl.preheat_ts + 6 * 3600) < 21.65
 
 
 def test_fallback_when_model_fails():

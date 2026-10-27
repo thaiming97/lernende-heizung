@@ -188,14 +188,15 @@ class ZoneController:
         u = np.concatenate([self.u_prev[k:], np.full(k, self.u_prev[-1])])
         return (M.T @ u) / M.sum(axis=0)
 
-    def make_plan(
+    def open_loop(
         self,
         ts: float,
         x_now: Inputs,
-        target_at: Callable[[float], Target],
         t_out_at: Callable[[float], float],
         sun_at: Callable[[float], float],
-    ) -> Plan:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Vorhersage für die nächsten horizon_h: (Zeitpunkte, freie Antwort bei u = 0, Antwortmatrix G,
+        Heizwirkung b je Schritt). T[k] = free[k] + (G @ u)[k] für wirksame Öffnungen u je 15-min-Schritt."""
         cfg, p, s = self.cfg, self.params, self.state
         dt = cfg.step_h
         n = int(round(cfg.horizon_h / dt))
@@ -243,6 +244,20 @@ class ZoneController:
         G = np.zeros((n, n))
         for k in range(n):
             G[k, : k + 1] = g[k::-1] * b[: k + 1]
+        return times, free, G, b
+
+    def make_plan(
+        self,
+        ts: float,
+        x_now: Inputs,
+        target_at: Callable[[float], Target],
+        t_out_at: Callable[[float], float],
+        sun_at: Callable[[float], float],
+    ) -> Plan:
+        cfg = self.cfg
+        dt = cfg.step_h
+        times, free, G, b = self.open_loop(ts, x_now, t_out_at, sun_at)
+        n = len(times)
         M = self._blocks(n)
         Ge = G @ M
 

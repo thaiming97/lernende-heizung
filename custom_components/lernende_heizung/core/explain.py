@@ -38,6 +38,7 @@ class Situation:
     hand_until: float | None = None  # von Hand eingestellt, gilt bis dahin
     sensor_mode: str | None = None  # Raumsensor fehlt: "halten" / "mittel" / "fest"
     sensor_last_ts: float | None = None  # letzter Raumwert
+    note: str | None = None  # Vorsatz vor der Erklärung (z. B. Urlaub: Absenken lohnt sich nicht)
 
 
 def _n(x: float, d: int = 1) -> str:
@@ -123,4 +124,6 @@ def explain(s: Situation) -> str:
         text = f"Von Hand bis {'0 Uhr' if hh == '00:00' else hh} – " + text
     elif s.sofi and r in ("komfort", "absenkung", "vorheizen", "beobachten", "rueckfall"):
         text = "Sofi da – " + text
+    elif s.note and r in ("komfort", "beobachten", "rueckfall"):
+        text = f"{s.note} – {text}"
     return text if len(text) <= MAX_LEN else text[: MAX_LEN - 1] + "…"

@@ -4,6 +4,21 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.11.0 – 2026-10-26
+
+- **Urlaub: Die Heizung prüft, ob sich das Absenken überhaupt lohnt.** Mit eingetragener Rückkehrzeit rechnet sie
+  beide Wege mit dem gelernten Modell durch: warm halten oder absenken und rechtzeitig wieder aufheizen. Spart das
+  Absenken weniger als 10 % der Wärme, bleibt es warm. Hintergrund ist der erste Urlaub am 23.–25.10.: Die
+  gut gedämmte Wohnung kühlte übers Wochenende nur 2–3 K ab, gespart waren grob 1–2 kWh, und beim Heimkommen um
+  18 Uhr waren die Räume noch 0,3–0,6 K zu kalt (das Wohnzimmer erst am Montagmorgen warm). Nachgerechnet lohnt
+  sich das Absenken hier erst ab etwa 10 Tagen. Die Erklärung sagt, was gilt („Urlaub: Absenken lohnt sich nicht
+  (spart nur ~6 %), bleibt warm“), die Anwesenheits-Auswahl zeigt die geschätzte Ersparnis.
+- **Lohnt es sich, wird sicher vorgeheizt.** Die Heizung rechnet den spätesten Start aus, ab dem sie mit voller
+  Leistung pünktlich zur Rückkehr warm bekommt – vorsichtig, mit nur zwei Dritteln der gelernten Heizwirkung (über
+  Stunden heizen die Heizkörper schwächer, als das Modell aus kurzen Abschnitten lernt). Der Start wird stündlich
+  mit der echten Raumtemperatur nachgerechnet; ab dann gilt der normale Zeitplan, der Status steht auf
+  „Vorheizen“. Bisher plante der Regler das Vorheizen nur 12 Stunden voraus und auf den letzten Drücker.
+
 ## 0.10.1 – 2026-10-20
 
 - **„Türen offen“ hält keine alte Zusatzwärme mehr fest.** Bisher fror der Schalter die geschätzte Zusatzwärme
