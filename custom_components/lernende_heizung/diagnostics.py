@@ -38,6 +38,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Heating
             },
             "regler": z.controller.export(),
             "sensorfilter": {"versatz": z.filt.offset, "n": z.filt.n, "gestoert": z.filt.disturbed},
+            "lueften_erholt_bis": z.recover_to,  # Temperatur vor dem Lüften, solange sich die Luft noch erholt
             "thermostate": [
                 {"entity": t.climate_id, "typ": t.kind, "erreichbar": t.available(), "zuletzt_gestellt": t.last_pct,
                  "befehl_haengt": t.write_mismatch(now), "zusatz_entities": t.entities}

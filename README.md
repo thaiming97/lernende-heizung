@@ -13,7 +13,8 @@ auch mit anderen Thermostatköpfen.
   vor einer Absenkung oder vor erwarteter Sonne früh genug auf.
 - **Stellt das Ventil direkt** (TRVZB: Öffnungs-/Schließgrad), batterieschonend gefiltert.
 - **Sicherheit**: Fenster/Tür länger als 1 min offen → Ventil zu, nach dem Schließen noch 15 min;
-  Frostschutz; Raumsensor fehlt oder meldet sich
+  bis die Luft danach fast wieder so warm ist wie vorher (höchstens 2 h), zählt ihr Aufwärmen nicht
+  als Zusatzwärme und es wird nicht gelernt; Frostschutz; Raumsensor fehlt oder meldet sich
   3 h nicht → feste mittlere Öffnung; passt das gelernte Modell nicht zur Messung → einfacher
   PI-Regler (Status „Sicherheitsbetrieb“); Hauptschalter aus → Thermostatköpfe regeln wieder
   selbst, mit ihrem eingebauten Fühler.

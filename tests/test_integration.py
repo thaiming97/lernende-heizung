@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import importlib
+import logging
+import math
 import time
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed, async_mock_service
 
 from custom_components.lernende_heizung import trv as trv_mod
@@ -126,6 +130,7 @@ async def test_observe_then_control_window_and_master(hass: HomeAssistant, freez
         assert status.state == "beobachten"
         climate = hass.states.get(_eid(hass, entry, "climate", "bad_climate"))
         assert climate.attributes["temperature"] == 23.5
+        assert climate.attributes["current_temperature"] == 20.0
 
         # Zone aktiv schalten → Ventil wird gestellt (20 °C bei Ziel 23,5 → öffnen)
         await hass.services.async_call("switch", "turn_on", {"entity_id": _eid(hass, entry, "switch", "bad_active")}, blocking=True)
@@ -284,6 +289,111 @@ async def test_valve_stays_closed_15_min_after_window(hass: HomeAssistant, freez
         await _tick(hass, freezer, coord, 360)  # > 15 min
         assert z.decision.reason != "fenster" and z.valve_pct > 0
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def _air(hass: HomeAssistant, freezer, coord, seconds: float, temp: float) -> None:
+    """Regeltakt mit vorgegebener Raumtemperatur."""
+    freezer.tick(timedelta(seconds=seconds))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    hass.states.async_set("sensor.bad_temp", f"{temp:.2f}", {"unit_of_measurement": "°C", "device_class": "temperature"},
+                          force_update=True)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+
+async def _aired(hass: HomeAssistant, freezer, coord) -> None:
+    """Bad bei 23,0 °C, dann 7 min kräftig gelüftet (Luft fällt auf 19,0 °C)."""
+    for _ in range(3):
+        await _air(hass, freezer, coord, 300, 23.0)
+    hass.states.async_set("binary_sensor.fenster_bad", "on")
+    await _air(hass, freezer, coord, 120, 22.0)
+    await _air(hass, freezer, coord, 300, 19.0)
+    hass.states.async_set("binary_sensor.fenster_bad", "off")
+    await _air(hass, freezer, coord, 5, 19.0)
+
+
+def _spy_freeze(ctl) -> list[bool]:
+    frozen: list[bool] = []
+    orig_observe = ctl.observe
+
+    def observe(*a, freeze_d=False, **kw):
+        frozen.append(freeze_d)
+        return orig_observe(*a, freeze_d=freeze_d, **kw)
+
+    ctl.observe = observe
+    return frozen
+
+
+async def test_disturbance_frozen_until_air_recovered(hass: HomeAssistant, freezer) -> None:
+    """Nach kräftigem Lüften wärmt sich die Luft über 1–2 h aus Wänden und Möbeln wieder auf. Das ist keine
+    Zusatzwärme: Die Störgröße bleibt eingefroren und das Lernen pausiert, bis die Luft fast wieder so warm ist
+    wie vor dem Öffnen (live 05.11.: nach 30 min lief d auf +0,6, Ventil nachts gedrosselt). Übersteht einen
+    Neustart."""
+    async_mock_service(hass, "number", "set_value")
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry = await _setup(hass)
+        coord = entry.runtime_data
+        async_mock_service(hass, "climate", "set_hvac_mode")
+        async_mock_service(hass, "select", "select_option")
+        await _activate(hass, entry)
+        await _aired(hass, freezer, coord)
+        z = coord.zones["bad"]
+        z.controller.d = 0.0  # vor dem Lüften keine Zusatzwärme
+        frozen = _spy_freeze(z.controller)
+        rebound = lambda m: 23.0 - 4.0 * math.exp(-m / 25)  # noqa: E731 – Minuten nach dem Schließen
+        for m in range(5, 65, 5):
+            await _air(hass, freezer, coord, 300, rebound(m))
+        assert frozen[-1]  # 1 h danach, Luft noch 0,4 K kälter als vorher
+        assert abs(z.controller.d) < 0.05  # Aufwärmen ist keine Zusatzwärme
+        assert "Fenster" in hass.states.get("sensor.bad_erklaerung_lh").attributes["lernpause"]
+        diag = await async_get_config_entry_diagnostics(hass, entry)
+        assert diag["zonen"]["bad"]["lueften_erholt_bis"] == pytest.approx(23.0, abs=0.05)
+        # Neustart mitten in der Erholung
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coord = entry.runtime_data
+        z = coord.zones["bad"]
+        frozen = _spy_freeze(z.controller)
+        await _air(hass, freezer, coord, 300, rebound(65))
+        assert frozen[-1]
+        for m in range(70, 95, 5):  # ab ~75 min weniger als 0,2 K unter vorher → wieder normal
+            await _air(hass, freezer, coord, 300, rebound(m))
+        assert not frozen[-1]
+        assert "Fenster" not in (hass.states.get("sensor.bad_erklaerung_lh").attributes["lernpause"] or "")
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_air_recovery_waits_at_most_two_hours(hass: HomeAssistant, freezer) -> None:
+    """Wird die Luft nach dem Lüften nicht mehr so warm wie vorher (z. B. war es vorher von der Sonne zu warm),
+    endet das Einfrieren spätestens 2 h nach dem Schließen."""
+    async_mock_service(hass, "number", "set_value")
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry = await _setup(hass)
+        coord = entry.runtime_data
+        async_mock_service(hass, "climate", "set_hvac_mode")
+        async_mock_service(hass, "select", "select_option")
+        await _activate(hass, entry)
+        await _aired(hass, freezer, coord)
+        frozen = _spy_freeze(coord.zones["bad"].controller)
+        for _ in range(23):  # bleibt bei 21,5 – bis 1 h 55 min eingefroren
+            await _air(hass, freezer, coord, 300, 21.5)
+        assert frozen[-1]
+        await _air(hass, freezer, coord, 600, 21.5)
+        assert not frozen[-1]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+def test_climate_without_deprecated_temperature_api(caplog) -> None:
+    """HA 2026.11 meldet die alten Namen (temperature_unit, current_temperature, target_temperature) als veraltet –
+    ab 2027.11 gehen sie nicht mehr. Ältere HA-Versionen kennen nur die alten (dort ist der Test immer grün)."""
+    from custom_components.lernende_heizung import climate as climate_mod
+
+    with caplog.at_level(logging.WARNING):
+        importlib.reload(climate_mod)  # die Warnung kommt beim Anlegen der Klasse
+    assert not [r.getMessage() for r in caplog.records if "deprecated" in r.getMessage()]
 
 
 async def test_new_zigbee2mqtt_sensor_names(hass: HomeAssistant) -> None:

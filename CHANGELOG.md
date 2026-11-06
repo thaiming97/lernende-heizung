@@ -4,6 +4,19 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.11.2 – 2026-11-06
+
+- **Nach kräftigem Lüften drosselt die Heizung nicht mehr fälschlich.** Nach dem Schließen wärmt sich die Luft
+  1–2 Stunden lang aus Wänden und Möbeln wieder auf. Bisher galt das nach 30 Minuten als „Zusatzwärme“: Am 05.11.
+  (Terrassentür offen, Wohnzimmer kurz 17,6 °C) stieg sie auf +0,6 K/h, die Ventile liefen nachts nur auf 14–36 %,
+  obwohl es 0,2–0,4 K zu kalt war, und das Wohnzimmer blieb bis zum Morgen bei 21,5 statt 21,8 °C. Jetzt wartet die
+  Heizung (Lernen und Störgrößen-Schätzung), bis die Luft fast wieder so warm ist wie vor dem Öffnen – höchstens
+  2 Stunden, auch über einen Neustart hinweg. Mit den Daten vom 05.11. nachgerechnet: Ventile bleiben offen,
+  Wohnzimmer nachts ~0,1–0,15 K wärmer. Kurzes Lüften ändert sich nicht.
+- **Bereit für Home Assistant 2027.11:** HA 2026.11 meldete, dass die Klima-Entities alte Namen für die
+  Temperaturen nutzen, die ab 2027.11 nicht mehr gehen. Jetzt mit den neuen Namen (ältere HA-Versionen
+  funktionieren weiter).
+
 ## 0.11.1 – 2026-10-27
 
 - **Urlaub: Vorheizen zielt gleich auf die Temperatur zur Rückkehr.** In 0.11.0 galt ab dem Vorheizstart der

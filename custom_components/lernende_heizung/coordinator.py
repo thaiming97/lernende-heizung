@@ -81,6 +81,8 @@ from .const import (
     SUN_STALE_S,
     WINDOW_DELAY_S,
     WINDOW_LEARN_PAUSE_S,
+    WINDOW_RECOVER_K,
+    WINDOW_RECOVER_MAX_S,
     WINDOW_RESUME_S,
     WINDOW_SETTLE_S,
 )
@@ -198,6 +200,7 @@ class Zone:
     override_until: float | None = None
     window_open: bool = False  # mindestens WINDOW_DELAY_S offen
     window_closed_ts: float | None = None  # danach bleibt das Ventil WINDOW_RESUME_S zu
+    recover_to: float | None = None  # Raumtemperatur vor dem Lüften – so lange erholt sich die Luft noch
     block_reason: str | None = None  # warum das Lernen zuletzt pausiert wurde
     temp: float | None = None
     valve_pct: int = 0  # von uns gestellt
@@ -416,6 +419,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "energy_kwh": z.energy_kwh, "learner": z.learner.export(), "controller": z.controller.export(),
                     "filter_offset": z.filt.offset, "filter_n": z.filt.n,
                     "vac_preheat_ts": z.vac_preheat_ts, "vac_preheating": z.vac_preheating,
+                    "recover_to": z.recover_to, "last_window_ts": z.last_window_ts,
                 }
                 for zid, z in self.zones.items()
             },
@@ -473,6 +477,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 pt = zr.get("vac_preheat_ts")
                 z.vac_preheat_ts = float(pt) if isinstance(pt, (int, float)) else None
                 z.vac_preheating = bool(zr.get("vac_preheating", False))
+            rt, lw = zr.get("recover_to"), zr.get("last_window_ts")  # Neustart mitten in der Erholung vom Lüften
+            if isinstance(rt, (int, float)) and isinstance(lw, (int, float)) and time.time() - lw < WINDOW_RECOVER_MAX_S:
+                z.recover_to, z.last_window_ts = float(rt), float(lw)
             z.filt.offset = float(zr.get("filter_offset", 0.0))
             z.filt.n = int(zr.get("filter_n", 0))
 
@@ -692,6 +699,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             was_open = z.window_open
             z.window_open = self._window_is_open(z, now_ts)
             if z.window_open:
+                if not was_open and z.recover_to is None:  # (erneut geöffnet, noch nicht erholt: alter Wert gilt)
+                    z.recover_to = z.temp  # noch der Wert vom letzten Takt, vor dem Auskühlen
                 z.last_window_ts = now_ts
                 z.window_closed_ts = None
             elif was_open:  # gerade geschlossen (der Fensterkontakt löst sofort einen Takt aus)
@@ -704,6 +713,11 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # vom Lüften erholt (die Luft wird dann echt schnell wieder warm)
             settling = now_ts - z.last_window_ts < WINDOW_SETTLE_S
             z.temp = z.filt.update(now_ts, prim, sec, sun=sun_direct, settling=settling)
+            if z.recover_to is not None and not z.window_open and (
+                z.temp is None or z.temp >= z.recover_to - WINDOW_RECOVER_K
+                or now_ts - z.last_window_ts >= WINDOW_RECOVER_MAX_S
+            ):
+                z.recover_to = None  # Luft hat sich vom Lüften erholt
             z.controlling = self.master_on and z.active
             z.valve_frac = self._valve_frac(z, now_ts)
 
@@ -768,8 +782,11 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Lernen (auch im Beobachtungsmodus, sofern die Ventilstellung bekannt ist). Im Sommer
             # pausiert es: offene Fenster, Sommerlüftung und starke Sonne passen nicht zum Winter, und
             # der Zug zum Startwert würde das Gelernte über die Heizkörper langsam vergessen.
+            recovering = z.recover_to is not None and not z.window_open
             if z.last_window_ts == now_ts:  # offen oder gerade geschlossen
                 self._block(z, now_ts + WINDOW_LEARN_PAUSE_S, PAUSE_WINDOW)
+            elif recovering:  # Luft wärmt sich noch aus Wänden und Möbeln auf – das kennt das Modell nicht
+                self._block(z, now_ts + CYCLE_S, PAUSE_WINDOW)
             if doors:  # Innentüren offen: Wärme fließt zwischen den Räumen ganz anders als sonst
                 self._block(z, now_ts + DOORS_SETTLE_S, PAUSE_DOORS)
             if summer:
@@ -791,7 +808,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # nach dem Schließen falsch und klänge erst über Stunden ab
                 # Türen noch offen: d führt nach (Modell stimmt dann nicht; eingefrorene Duschwärme hielt am 20.10. das
                 # Bad-Ventil zu, 23,3 → 22,7). Eingefroren klingt d ab.
-                freeze = now_ts - z.last_window_ts < WINDOW_LEARN_PAUSE_S or (doors_recent and not doors)
+                freeze = now_ts - z.last_window_ts < WINDOW_LEARN_PAUSE_S or recovering or (doors_recent and not doors)
                 z.controller.observe(now_ts, z.temp, x, effective_valve(valve_frac, z.controller.params.valve_exp), freeze_d=freeze)
             z.energy_kwh += heating_power_kw(z.controller.params, z.controller.state) * dt_h if z.controller.state else 0.0
 

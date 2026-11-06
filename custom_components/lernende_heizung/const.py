@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.11.1"
+VERSION: Final = "0.11.2"
 
 PLATFORMS: Final = ["binary_sensor", "button", "climate", "datetime", "select", "sensor", "switch"]
 
@@ -49,6 +49,10 @@ WINDOW_LEARN_PAUSE_S: Final = 1800
 WINDOW_SETTLE_S: Final = 3600  # so lange nach dem Lüften erholt sich die Raumluft (kein Spitzenfilter)
 WINDOW_DELAY_S: Final = 60  # erst so lange offen zählt ein Fenster/eine Tür (kurz rausgehen ändert nichts)
 WINDOW_RESUME_S: Final = 900  # nach dem Schließen so lange zu lassen – die Luft wärmt sich selbst wieder auf
+# Nach kräftigem Lüften wärmt sich die Luft 1–2 h aus Wänden und Möbeln auf – schneller, als das Modell kennt. Bis sie
+# fast wieder so warm ist wie vor dem Öffnen, ist das keine Zusatzwärme (live 05.11.: d +0,6, Ventil nachts gedrosselt).
+WINDOW_RECOVER_K: Final = 0.2
+WINDOW_RECOVER_MAX_S: Final = 2 * 3600  # … höchstens so lange nach dem Schließen (war es vorher z. B. sonnig warm)
 # Innentüren offen (Schalter „Türen offen“, nur von Hand): Räume heizen sich gegenseitig ganz anders als sonst →
 # nicht lernen. Danach braucht die Luft eine Weile, bis die Räume wieder für sich sind.
 DOORS_SETTLE_S: Final = 3600

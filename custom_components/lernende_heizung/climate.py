@@ -20,6 +20,9 @@ from .const import PRESET_AWAY, PRESET_COMFORT, PRESET_ECO, PRESET_SCHEDULE
 from .coordinator import HeatingCoordinator, Zone, _hhmm
 from .entity import ZoneEntity
 
+# Ab HA 2026.11 heißen die Temperaturen native_* (die alten Namen gehen ab 2027.11 nicht mehr), ältere kennen nur die alten
+_NATIVE = hasattr(ClimateEntity, "native_current_temperature")
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add: AddConfigEntryEntitiesCallback) -> None:
     c = entry.runtime_data
@@ -30,7 +33,7 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
     _platform = "climate"
     _attr_name = None
     _attr_translation_key = "zone"
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.AUTO, HVACMode.HEAT, HVACMode.OFF]
     _attr_preset_modes = [PRESET_SCHEDULE, PRESET_COMFORT, PRESET_ECO, PRESET_AWAY]
     _attr_supported_features = (
@@ -45,12 +48,17 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
         super().__init__(coordinator, zone, None)
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         return None if self.zone.temp is None else round(self.zone.temp, 2)
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         return self.coordinator.target_at(self.zone, time.time()).setpoint
+
+    if not _NATIVE:
+        _attr_temperature_unit = UnitOfTemperature.CELSIUS
+        current_temperature = native_current_temperature
+        target_temperature = native_target_temperature
 
     @property
     def hvac_mode(self) -> HVACMode:
