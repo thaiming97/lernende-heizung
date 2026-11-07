@@ -37,7 +37,8 @@ class PresenceSelect(HubEntity, SelectEntity):
         if not c.vac_active(time.time()) or c.vac_setback is None:
             return {}
         return {"urlaub_absenken": c.vac_setback, "urlaub_ersparnis_prozent": round(100 * (c.vac_frac or 0.0), 1),
-                "urlaub_ersparnis_kwh": round(c.vac_kwh or 0.0, 1)}
+                "urlaub_ersparnis_kwh": round(c.vac_kwh or 0.0, 1),
+                "urlaub_freigegeben": c.vac_force}
 
     async def async_select_option(self, option: str) -> None:
         self.coordinator.presence = option

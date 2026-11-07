@@ -109,7 +109,7 @@ from .core.model import (
 )
 from .core.schedule import ScheduleError, WeekSchedule
 from .core.signals import OutdoorFusion, RoomSensorFilter, SunModel, SupplyLearner
-from .core.vacation import plan_vacation, worth_it
+from .core.vacation import MIN_SAVING, plan_vacation, worth_it
 from .trv import TrvActuator
 
 _LOGGER = logging.getLogger(__name__)
@@ -267,6 +267,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.master_on = True
         self.sofi_on = False  # Sofi-Modus: gewählte Räume wärmer (eigene Temperatur je Zone)
         self.doors_open = False  # Schalter „Türen offen“ (Innentüren auf, z. B. für den Saugroboter)
+        self.vac_force = False  # Schalter „Urlaub: Absenken freigeben“ – auch absenken, wenn es wenig spart
         self.doors_since: float | None = None
         self.doors_last_ts = 0.0  # zuletzt Türen offen – danach noch DOORS_SETTLE_S Lernpause
         self.presence = PRESENCE_HOME
@@ -400,6 +401,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "master_on": self.master_on,
             "sofi_on": self.sofi_on,
             "doors_open": self.doors_open,
+            "vac_force": self.vac_force,
             "doors_since": self.doors_since,
             "doors_last_ts": self.doors_last_ts,
             "presence": self.presence,
@@ -430,6 +432,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.master_on = bool(raw.get("master_on", True))
         self.sofi_on = bool(raw.get("sofi_on", False))
         self.doors_open = bool(raw.get("doors_open", False))
+        self.vac_force = bool(raw.get("vac_force", False))
         since, last = raw.get("doors_since"), raw.get("doors_last_ts")
         self.doors_since = float(since) if self.doors_open and isinstance(since, (int, float)) else None
         if self.doors_open and self.doors_since is None:
@@ -951,6 +954,17 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for z in self.zones.values():
             z.vac_preheat_ts, z.vac_preheating = None, False
 
+    def set_vac_force(self, on: bool) -> None:
+        """Freigabe: im Urlaub auch dann absenken, wenn es wenig spart (unter MIN_SAVING). Gilt sofort auch für eine
+        schon getroffene Entscheidung – ohne neu zu rechnen: Ersparnis und Vorheizstart stehen ja schon fest."""
+        self.vac_force = on
+        if self.vac_setback is not None:
+            if on or self.vac_frac is not None:
+                self.vac_setback = on or self.vac_frac >= MIN_SAVING  # type: ignore[operator]
+            for z in self.zones.values():
+                z.controller.last_plan_ts = None
+        self.schedule_save()
+
     def vac_active(self, now_ts: float) -> bool:
         """Urlaub mit Rückkehrzeit, die noch kommt."""
         return self.presence == PRESENCE_VACATION and self.return_at is not None and now_ts < self.return_at.timestamp()
@@ -990,9 +1004,11 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.vac_ts = now_ts
                 if new:
                     self.vac_key = ret
-                    self.vac_setback, self.vac_frac, self.vac_kwh = worth_it(list(plans.values()))
-                    _LOGGER.info("Urlaub bis %s: Absenken %s (spart %.0f %% = %.1f kWh)", self.return_at,
-                                 "lohnt sich" if self.vac_setback else "lohnt sich nicht", 100 * self.vac_frac, self.vac_kwh)
+                    worth, self.vac_frac, self.vac_kwh = worth_it(list(plans.values()))
+                    self.vac_setback = worth or self.vac_force
+                    _LOGGER.info("Urlaub bis %s: Absenken %s (spart %.1f %% = %.1f kWh)", self.return_at,
+                                 "lohnt sich" if worth else ("freigegeben" if self.vac_force else "lohnt sich nicht"),
+                                 100 * self.vac_frac, self.vac_kwh)
                     for z in self.zones.values():
                         z.controller.last_plan_ts = None
                 for z in zones:

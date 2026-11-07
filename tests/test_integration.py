@@ -746,6 +746,22 @@ async def test_presence_beats_lasting_hand_settings(hass: HomeAssistant) -> None
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
+async def test_vacation_force_switch_survives_restart(hass: HomeAssistant) -> None:
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    force = _eid(hass, entry, "switch", "vac_force")
+    assert hass.states.get(force).state == "off"
+    await hass.services.async_call("switch", "turn_on", {"entity_id": force}, blocking=True)
+    await hass.async_block_till_done()
+    await entry.runtime_data.store.async_save(entry.runtime_data._export())
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(force).state == "on" and entry.runtime_data.vac_force
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_no_emergency_valve_while_sensors_start(hass: HomeAssistant, freezer) -> None:
     """Live 10.10.: nach dem HA-Neustart war der Raumsensor noch nicht da → alle Ventile sofort auf 12 %."""
     calls = async_mock_service(hass, "number", "set_value")
@@ -885,6 +901,26 @@ async def test_vacation_with_and_without_return(hass: HomeAssistant, freezer) ->
     explain = hass.states.get(_eid(hass, entry, "sensor", "bad_explain")).state
     assert "Absenken lohnt sich nicht (spart nur " in explain and "~" not in explain  # echter Wert, kein gerundetes „~5 %“
     assert coord.vac_frac < 0.05  # unter der Schwelle, sonst hieße es nicht „lohnt sich nicht“
+    # Freigabe: auch bei wenig Ersparnis absenken – sofort, ohne neue Rückkehrzeit; wieder aus → warm halten
+    force = _eid(hass, entry, "switch", "vac_force")
+    await hass.services.async_call("switch", "turn_on", {"entity_id": force}, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.vac_force and coord.vac_setback is True
+    assert hass.states.get(cid).attributes["temperature"] == 17.0
+    assert hass.states.get(presence).attributes["urlaub_absenken"] is True
+    assert hass.states.get(presence).attributes["urlaub_freigegeben"] is True
+    zone0 = coord.zones["bad"]
+    assert zone0.vac_preheat_ts is not None and time.time() < zone0.vac_preheat_ts <= coord.return_at.timestamp()
+    await hass.services.async_call("switch", "turn_off", {"entity_id": force}, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.vac_setback is False and hass.states.get(cid).attributes["temperature"] == 23.5
+    # eine neue Rückkehrzeit mit eingeschalteter Freigabe: gleich abgesenkt
+    await hass.services.async_call("switch", "turn_on", {"entity_id": force}, blocking=True)
+    await set_return(dt_util.utcnow() + timedelta(hours=14))
+    assert coord.vac_setback is True and coord.vac_frac < 0.05
+    await hass.services.async_call("switch", "turn_off", {"entity_id": force}, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.vac_setback is False
     # Rückkehrzeit wieder weg → unbegrenzt abgesenkt, die alte Entscheidung „warm halten“ gilt nicht mehr
     coord.return_at = None
     await coord.async_refresh()

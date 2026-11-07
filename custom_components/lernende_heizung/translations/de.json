@@ -110,7 +110,8 @@
       "master": {"name": "Regelung"},
       "active": {"name": "Aktiv regeln"},
       "sofi": {"name": "Sofi da"},
-      "doors": {"name": "Türen offen"}
+      "doors": {"name": "Türen offen"},
+      "vac_force": {"name": "Urlaub: Absenken freigeben"}
     },
     "select": {
       "presence": {"name": "Anwesenheit", "state": {"zuhause": "Zuhause", "abwesend": "Abwesend", "urlaub": "Urlaub"}},

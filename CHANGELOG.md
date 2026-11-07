@@ -18,6 +18,10 @@ diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
   Anzeige „~10 %“ sagte. Jetzt wird ab 5 % der Wärme fürs Warmhalten abgesenkt (die Rechnung ist ohnehin
   vorsichtig: ohne Sonne, Heizkörper nur mit 65 % Leistung). Die Erklärung nennt den genauen Wert („spart nur
   4,6 %“), nie ein aufgerundetes „~5 %“. Die Prozentangaben an der Anwesenheits-Auswahl haben eine Nachkommastelle.
+- **Neuer Schalter „Urlaub: Absenken freigeben“.** Hält die Heizung das Absenken für zu wenig, erlaubst du es damit
+  trotzdem: Es wird bis zur Rückkehr abgesenkt und sicher vorgeheizt, auch unter 5 % Ersparnis. Der Schalter wirkt
+  sofort (auch auf eine schon getroffene Entscheidung), bleibt über Neustarts an, bis du ihn ausschaltest, und
+  steht als Attribut `urlaub_freigegeben` an der Anwesenheits-Auswahl.
 
 ## 0.11.2 – 2026-11-06
 

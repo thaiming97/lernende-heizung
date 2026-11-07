@@ -72,6 +72,11 @@ heizt die Zone mit voller Leistung auf die Temperatur vor, die zur Rückkehr gil
 damit es dann warm ist). Dieser Start wird stündlich mit der tatsächlichen Raumtemperatur nachgerechnet
 und steht im Attribut `urlaub` der Erklärung; wird die Rückkehr verschoben, plant die Heizung neu. Ohne Rückkehrzeit wird bis auf Weiteres abgesenkt; „Abwesend“ senkt immer ab.
 
+Hält die Heizung das Absenken für zu wenig, kannst du es mit dem Schalter „Urlaub: Absenken freigeben“
+trotzdem erlauben: Dann wird bis zur Rückkehr abgesenkt und wie oben sicher vorgeheizt, auch bei weniger
+als 5 % Ersparnis. Der Schalter wirkt sofort auch auf eine schon getroffene Entscheidung, bleibt an, bis du ihn
+ausschaltest, und steht als `urlaub_freigegeben` an der Anwesenheits-Auswahl.
+
 ## Besuch, der es wärmer mag („Sofi da“)
 
 Je Zone unter „Konfigurieren“ → Zone bearbeiten eine *Temperatur, wenn Sofi da ist* eintragen

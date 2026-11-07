@@ -160,6 +160,9 @@
       },
       "doors": {
         "name": "Doors open"
+      },
+      "vac_force": {
+        "name": "Vacation: allow setback"
       }
     },
     "select": {

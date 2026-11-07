@@ -1,4 +1,5 @@
-"""Schalter: Regelung gesamt an/aus, Sofi da, Türen offen, je Zone „aktiv regeln" (aus = nur beobachten und lernen)."""
+"""Schalter: Regelung gesamt an/aus, Sofi da, Türen offen, Urlaub absenken freigeben, je Zone „aktiv regeln" (aus = nur
+beobachten und lernen)."""
 
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from .entity import HubEntity, ZoneEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry: HeatingConfigEntry, add: AddConfigEntryEntitiesCallback) -> None:
     c = entry.runtime_data
-    add([MasterSwitch(c), SofiSwitch(c), DoorsSwitch(c), *(ZoneActiveSwitch(c, z) for z in c.zones.values())])
+    add([MasterSwitch(c), SofiSwitch(c), DoorsSwitch(c), VacationForceSwitch(c), *(ZoneActiveSwitch(c, z) for z in c.zones.values())])
 
 
 class MasterSwitch(HubEntity, SwitchEntity):
@@ -88,6 +89,29 @@ class DoorsSwitch(HubEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.coordinator.set_doors(False)
+        await self.coordinator.async_refresh()
+
+
+class VacationForceSwitch(HubEntity, SwitchEntity):
+    """Freigabe fürs Absenken im Urlaub: Auch wenn die Heizung es für zu wenig hält (unter 5 % Ersparnis), wird bis zur
+    Rückkehr abgesenkt und sicher vorgeheizt. Bleibt an, bis man ihn ausschaltet."""
+
+    _platform = "switch"
+    _attr_icon = "mdi:snowflake-thermometer"
+
+    def __init__(self, coordinator: HeatingCoordinator) -> None:
+        super().__init__(coordinator, "vac_force")
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.vac_force
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.coordinator.set_vac_force(True)
+        await self.coordinator.async_refresh()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.coordinator.set_vac_force(False)
         await self.coordinator.async_refresh()
 
 
