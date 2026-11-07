@@ -84,9 +84,10 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
         attrs: dict[str, Any] = {"grund": d.reason if d else None, "ventil": z.valve_pct, "aktiv": z.active}
         if self.coordinator.sofi_active(z):
             attrs["sofi"] = True
-        # von Hand eingestellt (Temperatur, „Heizen“ oder Preset) – gilt bis Mitternacht
-        until = self.coordinator.hand_until(z, time.time())
-        attrs["manuell"] = until is not None
+        # von Hand eingestellt: Temperatur in Automatik gilt bis Mitternacht, „Heizen“ und Preset bis auf Weiteres
+        now = time.time()
+        attrs["manuell"] = self.coordinator.hand_active(z, now)
+        until = self.coordinator.hand_until(z, now)
         if until is not None:
             attrs["manuell_bis"] = _hhmm(until)
         if d and d.plan is not None:

@@ -4,6 +4,21 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.12.0 – 2026-11-07
+
+- **Nur die verstellte Temperatur geht um 0 Uhr zurück.** Bisher endete alles von Hand – auch „Heizen“ und die
+  Presets Komfort/Eco/Weg – um Mitternacht. Jetzt gilt: Die Temperatur, die man in Automatik mit +/− verstellt,
+  gilt bis 0 Uhr und fällt dann auf Zeitplan bzw. Preset zurück. „Heizen“ und die Presets bleiben, wie eingestellt
+  (auch über Mitternacht und einen Neustart), bis man auf „Automatik“ bzw. „Plan“ zurückstellt. „Aus“ blieb schon
+  immer. Der Status zeigt „Von Hand“, die Erklärung „Von Hand bis auf Weiteres“ (bzw. „bis 0 Uhr“), das
+  Thermostat-Attribut `manuell_bis` gibt es nur bei einer befristeten Einstellung. „Abwesend“ und „Urlaub“ gehen
+  weiter vor – dann ruht ein gesetztes Preset bzw. „Heizen“ und der Status sagt nicht „Von Hand“.
+  Beim Update bleiben schon gesetzte Presets/„Heizen“ bis zu ihrem alten Ende (0 Uhr) bestehen.
+- **Urlaub: Absenken ab 5 % Ersparnis statt 10 %.** Knapp unter 10 % (z. B. 9,6 %) blieb es warm, obwohl die
+  Anzeige „~10 %“ sagte. Jetzt wird ab 5 % der Wärme fürs Warmhalten abgesenkt (die Rechnung ist ohnehin
+  vorsichtig: ohne Sonne, Heizkörper nur mit 65 % Leistung). Die Erklärung nennt den genauen Wert („spart nur
+  4,6 %“), nie ein aufgerundetes „~5 %“. Die Prozentangaben an der Anwesenheits-Auswahl haben eine Nachkommastelle.
+
 ## 0.11.2 – 2026-11-06
 
 - **Nach kräftigem Lüften drosselt die Heizung nicht mehr fälschlich.** Nach dem Schließen wärmt sich die Luft

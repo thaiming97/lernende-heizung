@@ -70,7 +70,7 @@ en["entity"]["select"]["season"]["state"] = {"auto": "Automatic (heating limit)"
 en["entity"]["climate"]["zone"]["state_attributes"]["preset_mode"]["state"] = {"none": "Schedule", "comfort": "Comfort", "eco": "Setback", "away": "Away"}
 en["entity"]["sensor"]["status"]["state"] = {
     "komfort": "Comfort", "absenkung": "Setback", "vorheizen": "Preheating", "fenster": "Window open", "frostschutz": "Frost protection",
-    "aus": "Off", "rueckfall": "Safe mode", "kein_sensor": "Sensor missing", "sommer": "Summer", "beobachten": "Observe only", "manuell": "Manual (until midnight)",
+    "aus": "Off", "rueckfall": "Safe mode", "kein_sensor": "Sensor missing", "sommer": "Summer", "beobachten": "Observe only", "manuell": "Manual",
 }
 txt = json.dumps(en, ensure_ascii=False, indent=2) + "\n"
 (base / "translations" / "en.json").write_text(txt, encoding="utf8")

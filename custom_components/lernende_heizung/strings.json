@@ -257,7 +257,7 @@
           "kein_sensor": "Sensor missing",
           "sommer": "Summer",
           "beobachten": "Observe only",
-          "manuell": "Manual (until midnight)"
+          "manuell": "Manual"
         }
       },
       "saving": {

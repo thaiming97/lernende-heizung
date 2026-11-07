@@ -51,19 +51,21 @@ Releases auf GitHub (HACS zeigt die Notizen beim Update an).
 
 Komfortzeiten als Text, z. B. `Mo-Fr 05:00-05:30, 15:30-22:30; Sa-So 08:00-22:30`
 oder `immer` (Tage auch ausgeschrieben oder englisch, z. B. `Tue-Thu`). Außerhalb gilt die
-Absenkung. Alles, was von Hand eingestellt wird – Temperatur, „Heizen“ oder ein Preset –, gilt bis
-Mitternacht (auch über Zeitplanwechsel und „Abwesend“ hinweg), danach läuft die Zone wieder in
-Automatik. Ein Wechsel der Anwesenheit hebt eine verstellte Temperatur früher auf. Eine auf „Aus“
-gestellte Zone bleibt aus. Solange etwas von Hand gilt, steht der Status auf „Von Hand (bis 0 Uhr)“,
-das Thermostat hat die Attribute `manuell` und `manuell_bis`, und die Erklärung beginnt mit
-„Von Hand bis 0 Uhr“.
+Absenkung. Nur eine in Automatik verstellte Temperatur (+/−) gilt bis Mitternacht (auch über
+Zeitplanwechsel hinweg), danach läuft die Zone wieder nach Zeitplan bzw. Preset; ein Wechsel der
+Anwesenheit hebt sie früher auf. „Heizen“ (feste Temperatur) und die Presets Komfort/Eco/Weg bleiben, wie
+eingestellt, bis man auf „Automatik“ bzw. „Plan“ zurückstellt – ebenso eine auf „Aus“ gestellte Zone.
+„Abwesend“ und „Urlaub“ gehen dem vor (sonst hebelt ein vergessenes „Komfort“ den Urlaub aus).
+Solange etwas von Hand gilt, steht der Status auf „Von Hand“, das Thermostat hat das Attribut `manuell`
+(und `manuell_bis`, solange es befristet ist), und die Erklärung beginnt mit „Von Hand bis 0 Uhr“ bzw.
+„Von Hand bis auf Weiteres“.
 
 ## Urlaub
 
 Anwesenheit auf „Urlaub“ und die Rückkehrzeit eintragen. Die Heizung rechnet dann mit dem gelernten
 Modell aus, ob sich das Absenken überhaupt lohnt: Eine gut gedämmte, träge Wohnung kühlt in ein paar
 Tagen kaum aus, gespart wird wenig, und das Wiederaufheizen dauert lange. Spart das Absenken (Vorheizen
-eingerechnet) weniger als 10 % der Wärme fürs Warmhalten, bleibt es warm – die Erklärung sagt das
+eingerechnet) weniger als 5 % der Wärme fürs Warmhalten, bleibt es warm – die Erklärung sagt das
 („Urlaub: Absenken lohnt sich nicht …“), die Anwesenheits-Auswahl zeigt `urlaub_absenken` und die
 geschätzte Ersparnis. Lohnt es sich, gilt die Urlaubstemperatur, und ab dem spätesten sicheren Start
 heizt die Zone mit voller Leistung auf die Temperatur vor, die zur Rückkehr gilt (vorsichtig gerechnet,
