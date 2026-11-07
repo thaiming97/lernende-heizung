@@ -642,43 +642,123 @@ async def test_climate_modes_and_override(hass: HomeAssistant) -> None:
 
 
 async def test_hand_settings_end_at_midnight(hass: HomeAssistant, freezer) -> None:
-    """Felix: von Hand geänderte Temperatur bleibt bis 0 Uhr, dann wieder Automatik – und man sieht es."""
+    """Felix: Nur eine in Automatik verstellte Temperatur geht um 0 Uhr zurück – man sieht es. Preset, „Heizen“ und
+    „Aus“ bleiben, wie eingestellt."""
     freezer.move_to(dt_util.as_utc(dt_util.now().replace(hour=19, minute=0, second=0, microsecond=0)))
     async_mock_service(hass, "number", "set_value")
     entry = await _setup(hass)
     coord = entry.runtime_data
     cid = _eid(hass, entry, "climate", "bad_climate")
     sid = "sensor.bad_status_lh"
+    expl = "sensor.bad_erklaerung_lh"
     await hass.services.async_call("switch", "turn_on", {"entity_id": _eid(hass, entry, "switch", "bad_active")}, blocking=True)
     await hass.async_block_till_done()
     auto_temp = hass.states.get(cid).attributes["temperature"]
     assert hass.states.get(cid).attributes["manuell"] is False
+
+    async def midnight(hours: float = 5.1) -> None:
+        freezer.tick(timedelta(hours=hours))
+        hass.states.async_set("sensor.bad_temp", "20.0", {"unit_of_measurement": "°C", "device_class": "temperature"})  # frisch
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+    # Temperatur in Automatik verstellt → bis 0 Uhr, dann wieder Zeitplan
     await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 25.0}, blocking=True)
     await hass.async_block_till_done()
     a = hass.states.get(cid).attributes
     assert a["temperature"] == 25.0 and a["manuell"] is True and a["manuell_bis"] == "00:00"
     assert hass.states.get(sid).state == "manuell"
-    assert hass.states.get("sensor.bad_erklaerung_lh").state.startswith("Von Hand bis 0 Uhr")
-    freezer.tick(timedelta(hours=5, minutes=5))  # 00:05
-    await coord.async_refresh()
-    await hass.async_block_till_done()
+    assert hass.states.get(expl).state.startswith("Von Hand bis 0 Uhr")
+    await midnight()  # 00:05
     a = hass.states.get(cid).attributes
     assert a["temperature"] == auto_temp and a["manuell"] is False and "manuell_bis" not in a
     assert hass.states.get(sid).state != "manuell" and coord.zones["bad"].override is None
-    # „Heizen“ (feste Temperatur) endet ebenfalls um Mitternacht …
+    # „Heizen“ (feste Temperatur) bleibt über Mitternacht und HA-Neustart, bis man auf Automatik zurückstellt
     await hass.services.async_call("climate", "set_hvac_mode", {"entity_id": cid, "hvac_mode": "heat"}, blocking=True)
+    await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 22.5}, blocking=True)
     await hass.async_block_till_done()
-    assert hass.states.get(cid).state == "heat" and hass.states.get(cid).attributes["manuell"] is True
-    freezer.tick(timedelta(hours=24))
-    await coord.async_refresh()
+    a = hass.states.get(cid).attributes
+    assert hass.states.get(cid).state == "heat" and a["manuell"] is True and "manuell_bis" not in a
+    assert hass.states.get(sid).state == "manuell"
+    assert hass.states.get(expl).state.startswith("Von Hand bis auf Weiteres")
+    await midnight(24)
+    assert hass.states.get(cid).state == "heat" and hass.states.get(cid).attributes["temperature"] == 22.5
+    assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert hass.states.get(cid).state == "auto"
-    # … „Aus“ nicht
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    assert hass.states.get(cid).state == "heat" and hass.states.get(cid).attributes["temperature"] == 22.5
+    await hass.services.async_call("climate", "set_hvac_mode", {"entity_id": cid, "hvac_mode": "auto"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).state == "auto" and hass.states.get(cid).attributes["manuell"] is False
+    # Preset („Weg“) bleibt ebenfalls, auch über Mitternacht und Neustart – bis „Plan“
+    await hass.services.async_call("climate", "set_preset_mode", {"entity_id": cid, "preset_mode": "away"}, blocking=True)
+    await hass.async_block_till_done()
+    a = hass.states.get(cid).attributes
+    assert a["temperature"] == 17.0 and a["manuell"] is True and "manuell_bis" not in a
+    await midnight(24)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    a = hass.states.get(cid).attributes
+    assert a["preset_mode"] == "away" and a["temperature"] == 17.0 and a["manuell"] is True
+    # … eine Temperatur obendrauf (Automatik) endet um 0 Uhr, das Preset danach weiter
+    await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 19.5}, blocking=True)
+    await hass.async_block_till_done()
+    a = hass.states.get(cid).attributes
+    assert a["temperature"] == 19.5 and a["manuell_bis"] == "00:00"
+    await midnight(24)
+    a = hass.states.get(cid).attributes
+    assert a["preset_mode"] == "away" and a["temperature"] == 17.0 and a["manuell"] is True and "manuell_bis" not in a
+    await hass.services.async_call("climate", "set_preset_mode", {"entity_id": cid, "preset_mode": "none"}, blocking=True)
+    await hass.async_block_till_done()
+    a = hass.states.get(cid).attributes
+    assert a["temperature"] == auto_temp and a["manuell"] is False
+    # „Aus“ bleibt auch
     await hass.services.async_call("climate", "set_hvac_mode", {"entity_id": cid, "hvac_mode": "off"}, blocking=True)
-    freezer.tick(timedelta(hours=24))
-    await coord.async_refresh()
-    await hass.async_block_till_done()
+    await midnight(24)
     assert hass.states.get(cid).state == "off"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_presence_beats_lasting_hand_settings(hass: HomeAssistant) -> None:
+    """Preset/„Heizen“ bleiben jetzt dauerhaft – „Abwesend“ muss trotzdem gewinnen (sonst hebelt ein vergessenes
+    „Komfort“ den Urlaub aus), und der Status behauptet dann nicht „Von Hand“."""
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    cid = _eid(hass, entry, "climate", "bad_climate")
+    presence = _eid(hass, entry, "select", "presence")
+    await hass.services.async_call("climate", "set_preset_mode", {"entity_id": cid, "preset_mode": "comfort"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(cid).attributes["temperature"] == 23.5 and hass.states.get(cid).attributes["manuell"] is True
+    await hass.services.async_call("select", "select_option", {"entity_id": presence, "option": "abwesend"}, blocking=True)
+    await hass.async_block_till_done()
+    a = hass.states.get(cid).attributes
+    assert a["temperature"] == 17.0 and a["manuell"] is False and hass.states.get("sensor.bad_status_lh").state != "manuell"
+    assert not hass.states.get("sensor.bad_erklaerung_lh").state.startswith("Von Hand")
+    await hass.services.async_call("select", "select_option", {"entity_id": presence, "option": "zuhause"}, blocking=True)
+    await hass.async_block_till_done()
+    a = hass.states.get(cid).attributes
+    assert a["preset_mode"] == "comfort" and a["temperature"] == 23.5 and a["manuell"] is True
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_vacation_force_switch_survives_restart(hass: HomeAssistant) -> None:
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    force = _eid(hass, entry, "switch", "vac_force")
+    assert hass.states.get(force).state == "off"
+    await hass.services.async_call("switch", "turn_on", {"entity_id": force}, blocking=True)
+    await hass.async_block_till_done()
+    await entry.runtime_data.store.async_save(entry.runtime_data._export())
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(force).state == "on" and entry.runtime_data.vac_force
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -818,7 +898,29 @@ async def test_vacation_with_and_without_return(hass: HomeAssistant, freezer) ->
     assert coord.vac_setback is False
     assert hass.states.get(cid).attributes["temperature"] == 23.5
     assert hass.states.get(presence).attributes["urlaub_absenken"] is False
-    assert "Absenken lohnt sich nicht" in hass.states.get(_eid(hass, entry, "sensor", "bad_explain")).state
+    explain = hass.states.get(_eid(hass, entry, "sensor", "bad_explain")).state
+    assert "Absenken lohnt sich nicht (spart nur " in explain and "~" not in explain  # echter Wert, kein gerundetes „~5 %“
+    assert coord.vac_frac < 0.05  # unter der Schwelle, sonst hieße es nicht „lohnt sich nicht“
+    # Freigabe: auch bei wenig Ersparnis absenken – sofort, ohne neue Rückkehrzeit; wieder aus → warm halten
+    force = _eid(hass, entry, "switch", "vac_force")
+    await hass.services.async_call("switch", "turn_on", {"entity_id": force}, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.vac_force and coord.vac_setback is True
+    assert hass.states.get(cid).attributes["temperature"] == 17.0
+    assert hass.states.get(presence).attributes["urlaub_absenken"] is True
+    assert hass.states.get(presence).attributes["urlaub_freigegeben"] is True
+    zone0 = coord.zones["bad"]
+    assert zone0.vac_preheat_ts is not None and time.time() < zone0.vac_preheat_ts <= coord.return_at.timestamp()
+    await hass.services.async_call("switch", "turn_off", {"entity_id": force}, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.vac_setback is False and hass.states.get(cid).attributes["temperature"] == 23.5
+    # eine neue Rückkehrzeit mit eingeschalteter Freigabe: gleich abgesenkt
+    await hass.services.async_call("switch", "turn_on", {"entity_id": force}, blocking=True)
+    await set_return(dt_util.utcnow() + timedelta(hours=14))
+    assert coord.vac_setback is True and coord.vac_frac < 0.05
+    await hass.services.async_call("switch", "turn_off", {"entity_id": force}, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.vac_setback is False
     # Rückkehrzeit wieder weg → unbegrenzt abgesenkt, die alte Entscheidung „warm halten“ gilt nicht mehr
     coord.return_at = None
     await coord.async_refresh()

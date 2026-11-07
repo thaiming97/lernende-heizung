@@ -109,7 +109,7 @@ from .core.model import (
 )
 from .core.schedule import ScheduleError, WeekSchedule
 from .core.signals import OutdoorFusion, RoomSensorFilter, SunModel, SupplyLearner
-from .core.vacation import plan_vacation, worth_it
+from .core.vacation import MIN_SAVING, plan_vacation, worth_it
 from .trv import TrvActuator
 
 _LOGGER = logging.getLogger(__name__)
@@ -165,7 +165,7 @@ def _when(ts: float, now_ts: float) -> str:
     return f"{_WEEKDAYS[loc.weekday()]} {loc.strftime('%H:%M')}"
 
 
-def _ts_or(v: Any, default: float) -> float:
+def _ts_or(v: Any, default: float | None) -> float | None:
     return float(v) if isinstance(v, (int, float)) else default
 
 
@@ -189,8 +189,9 @@ class Zone:
     filt: RoomSensorFilter = field(default_factory=RoomSensorFilter)
     trvs: list[TrvActuator] = field(default_factory=list)
     active: bool = False
-    # Von Hand gesetzt (Preset, „Heizen“, Temperatur) gilt bis Mitternacht, danach wieder Automatik.
-    # Bewusst ohne Ende: Zone „Aus“.
+    # Von Hand gesetzt: Nur eine verstellte Temperatur in Automatik (override) gilt bis Mitternacht, danach wieder
+    # Zeitplan. Preset (Komfort/Eco/Weg) und „Heizen“ bleiben, wie eingestellt, bis man sie ändert – ebenso „Aus“
+    # (…_until = None heißt: ohne Ende).
     preset: str = PRESET_SCHEDULE
     preset_until: float | None = None
     hvac_off: bool = False
@@ -266,6 +267,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.master_on = True
         self.sofi_on = False  # Sofi-Modus: gewählte Räume wärmer (eigene Temperatur je Zone)
         self.doors_open = False  # Schalter „Türen offen“ (Innentüren auf, z. B. für den Saugroboter)
+        self.vac_force = False  # Schalter „Urlaub: Absenken freigeben“ – auch absenken, wenn es wenig spart
         self.doors_since: float | None = None
         self.doors_last_ts = 0.0  # zuletzt Türen offen – danach noch DOORS_SETTLE_S Lernpause
         self.presence = PRESENCE_HOME
@@ -399,6 +401,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "master_on": self.master_on,
             "sofi_on": self.sofi_on,
             "doors_open": self.doors_open,
+            "vac_force": self.vac_force,
             "doors_since": self.doors_since,
             "doors_last_ts": self.doors_last_ts,
             "presence": self.presence,
@@ -429,6 +432,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.master_on = bool(raw.get("master_on", True))
         self.sofi_on = bool(raw.get("sofi_on", False))
         self.doors_open = bool(raw.get("doors_open", False))
+        self.vac_force = bool(raw.get("vac_force", False))
         since, last = raw.get("doors_since"), raw.get("doors_last_ts")
         self.doors_since = float(since) if self.doors_open and isinstance(since, (int, float)) else None
         if self.doors_open and self.doors_since is None:
@@ -457,18 +461,18 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if z is None:
                 continue
             z.active = bool(zr.get("active", False))
-            # Stände ohne Ende (vor 0.7.1 galt „von Hand“ unbefristet) enden an der nächsten Mitternacht
-            end = self.hand_end()
+            # Preset und „Heizen“ gelten ohne Ende (None) oder bis zu einer gespeicherten Zeit (Stände vor 0.12.0: bis
+            # Mitternacht); eine verstellte Temperatur endet immer an der nächsten Mitternacht
             z.preset = zr.get("preset", PRESET_SCHEDULE)
             if z.preset != PRESET_SCHEDULE:
-                z.preset_until = _ts_or(zr.get("preset_until"), end)
+                z.preset_until = _ts_or(zr.get("preset_until"), None)
             z.hvac_off = bool(zr.get("hvac_off", False))
             man = zr.get("manual")
             if isinstance(man, (int, float)):
-                z.manual, z.manual_until = float(man), _ts_or(zr.get("manual_until"), end)
+                z.manual, z.manual_until = float(man), _ts_or(zr.get("manual_until"), None)
             ov = zr.get("override")
             if isinstance(ov, (int, float)):
-                z.override, z.override_until = float(ov), _ts_or(zr.get("override_until"), end)
+                z.override, z.override_until = float(ov), _ts_or(zr.get("override_until"), self.hand_end())
             z.energy_kwh = float(zr.get("energy_kwh", 0.0))
             z.learner.restore(zr.get("learner", {}))
             z.controller.restore(zr.get("controller", {}))
@@ -487,28 +491,36 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.store.async_delay_save(self._export, STORE_SAVE_DELAY_S)
 
     # ------------------------------------------------------------------ Sollwerte
-    def target_at(self, z: Zone, ts: float) -> Target:
-        if z.hvac_off:
-            return Target(FROST_C, False)
-        # Von Hand verstellte Temperatur gilt bis Mitternacht – auch bei Preset oder Abwesenheit
-        if self.override_active(z, ts):
-            return Target(z.override, True)
-        manual = z.manual if self.manual_active(z, ts) else None
-        preset = self.preset_at(z, ts)
-        # Sofi da: ihre Räume bleiben warm, auch wenn „Abwesend“/„Urlaub“ eingestellt ist
-        sofi = self.sofi_active(z)
-        if self.presence == PRESENCE_AWAY and not sofi:
+    def _presence_target(self, z: Zone, ts: float) -> Target | None:
+        """Was die Anwesenheit vorgibt, wenn sie den Zeitplan und alles von Hand außer einer verstellten Temperatur
+        verdrängt („Abwesend“, „Urlaub“); sonst None. Sofi-Räume bleiben warm."""
+        if self.sofi_active(z):
+            return None
+        if self.presence == PRESENCE_AWAY:
             return Target(z.away, False)
         # Urlaub: Abwesenheitstemperatur bis zur Rückkehr (ohne Rückkehrzeit unbegrenzt); danach gilt wieder
         # der Zeitplan. Mit Rückkehrzeit nur, wenn sich das Absenken lohnt, und nur bis zum Vorheizen
         # (_update_vacation): ab dann gilt schon das, was zur Rückkehr gilt – der Regler heizt mit voller Leistung.
         # Nicht der Zeitplan von jetzt: in dessen Eco-Zeit (nachts, werktags tagsüber) würde er nur bis Eco heizen
         # und den Rest wieder „just in time“ planen – genau das kam am 25.10. zu spät.
-        if self.presence == PRESENCE_VACATION and not sofi and (self.return_at is None or ts < self.return_at.timestamp()):
+        if self.presence == PRESENCE_VACATION and (self.return_at is None or ts < self.return_at.timestamp()):
             if z.vac_preheating and self.return_at is not None:
                 return self.target_at(z, self.return_at.timestamp() + 60)
             if self.vac_setback is not False:
                 return Target(z.away, False)
+        return None
+
+    def target_at(self, z: Zone, ts: float) -> Target:
+        if z.hvac_off:
+            return Target(FROST_C, False)
+        # In Automatik von Hand verstellte Temperatur gilt bis Mitternacht – auch bei Preset oder Abwesenheit
+        if self.override_active(z, ts):
+            return Target(z.override, True)
+        manual = z.manual if self.manual_active(z, ts) else None
+        preset = self.preset_at(z, ts)
+        by_presence = self._presence_target(z, ts)
+        if by_presence is not None:
+            return by_presence
         if manual is not None:
             return Target(manual, True)
         comfort = self.comfort_of(z)
@@ -545,19 +557,22 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return dt_util.start_of_local_day(dt_util.now() + timedelta(days=1)).timestamp()
 
     def set_override(self, z: Zone, temp: float) -> None:
-        """Temperatur von Hand in Automatik – gilt bis Mitternacht, auch über Zeitplanwechsel hinweg.
-        Früher: bis zum nächsten Zeitplanwechsel bzw. bei Zeitplan „immer“ unbefristet."""
+        """Temperatur von Hand in Automatik – gilt bis Mitternacht, auch über Zeitplanwechsel hinweg, danach wieder
+        Zeitplan bzw. Preset. Nur das endet von selbst; „Heizen“ und Presets bleiben, wie eingestellt."""
         z.override = temp
         z.override_until = self.hand_end()
 
-    def set_manual(self, z: Zone, temp: float | None) -> None:
-        """„Heizen“ mit fester Temperatur bis Mitternacht; None = zurück auf Automatik."""
+    @staticmethod
+    def set_manual(z: Zone, temp: float | None) -> None:
+        """„Heizen“ mit fester Temperatur – bleibt, bis man auf Automatik zurückstellt; None = zurück auf Automatik."""
         z.manual = temp
-        z.manual_until = None if temp is None else self.hand_end()
+        z.manual_until = None
 
-    def set_preset(self, z: Zone, preset: str) -> None:
+    @staticmethod
+    def set_preset(z: Zone, preset: str) -> None:
+        """Komfort/Eco/Weg bleiben, bis man auf „Plan“ zurückstellt."""
         z.preset = preset
-        z.preset_until = None if preset == PRESET_SCHEDULE else self.hand_end()
+        z.preset_until = None
 
     @staticmethod
     def override_active(z: Zone, ts: float) -> bool:
@@ -573,20 +588,28 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return z.preset
         return PRESET_SCHEDULE
 
-    def hand_until(self, z: Zone, ts: float) -> float | None:
-        """Bis wann gerade eine Einstellung von Hand gilt (None = Automatik)."""
+    def _hand(self, z: Zone, ts: float) -> tuple[bool, float | None]:
+        """Gilt gerade etwas von Hand, und bis wann? Maßgeblich ist, was den Sollwert bestimmt (wie in target_at):
+        verstellte Temperatur, sonst Anwesenheit (dann nichts), sonst „Heizen“, sonst Preset. Ende None = bis auf Weiteres."""
         if z.hvac_off:
-            return None
-        ends = []
+            return False, None
         if self.override_active(z, ts):
-            ends.append(z.override_until)
+            return True, z.override_until
+        if self._presence_target(z, ts) is not None:  # „Abwesend“/„Urlaub“ gehen vor: Heizen und Preset ruhen dann
+            return False, None
         if self.manual_active(z, ts):
-            ends.append(z.manual_until)
+            return True, z.manual_until
         if self.preset_at(z, ts) != PRESET_SCHEDULE:
-            ends.append(z.preset_until)
-        if not ends:
-            return None
-        return None if any(e is None for e in ends) else max(ends)
+            return True, z.preset_until
+        return False, None
+
+    def hand_active(self, z: Zone, ts: float) -> bool:
+        """Läuft die Zone gerade nicht nach Zeitplan, weil etwas von Hand eingestellt ist?"""
+        return self._hand(z, ts)[0]
+
+    def hand_until(self, z: Zone, ts: float) -> float | None:
+        """Bis wann die Einstellung von Hand gilt – None: Automatik oder bis auf Weiteres (siehe hand_active)."""
+        return self._hand(z, ts)[1]
 
     def _expire_hand(self, z: Zone, ts: float) -> None:
         """Abgelaufene Einstellungen von Hand löschen – die Zone läuft wieder in Automatik."""
@@ -931,6 +954,17 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for z in self.zones.values():
             z.vac_preheat_ts, z.vac_preheating = None, False
 
+    def set_vac_force(self, on: bool) -> None:
+        """Freigabe: im Urlaub auch dann absenken, wenn es wenig spart (unter MIN_SAVING). Gilt sofort auch für eine
+        schon getroffene Entscheidung – ohne neu zu rechnen: Ersparnis und Vorheizstart stehen ja schon fest."""
+        self.vac_force = on
+        if self.vac_setback is not None:
+            if on or self.vac_frac is not None:
+                self.vac_setback = on or self.vac_frac >= MIN_SAVING  # type: ignore[operator]
+            for z in self.zones.values():
+                z.controller.last_plan_ts = None
+        self.schedule_save()
+
     def vac_active(self, now_ts: float) -> bool:
         """Urlaub mit Rückkehrzeit, die noch kommt."""
         return self.presence == PRESENCE_VACATION and self.return_at is not None and now_ts < self.return_at.timestamp()
@@ -970,9 +1004,11 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.vac_ts = now_ts
                 if new:
                     self.vac_key = ret
-                    self.vac_setback, self.vac_frac, self.vac_kwh = worth_it(list(plans.values()))
-                    _LOGGER.info("Urlaub bis %s: Absenken %s (spart %.0f %% = %.1f kWh)", self.return_at,
-                                 "lohnt sich" if self.vac_setback else "lohnt sich nicht", 100 * self.vac_frac, self.vac_kwh)
+                    worth, self.vac_frac, self.vac_kwh = worth_it(list(plans.values()))
+                    self.vac_setback = worth or self.vac_force
+                    _LOGGER.info("Urlaub bis %s: Absenken %s (spart %.1f %% = %.1f kWh)", self.return_at,
+                                 "lohnt sich" if worth else ("freigegeben" if self.vac_force else "lohnt sich nicht"),
+                                 100 * self.vac_frac, self.vac_kwh)
                     for z in self.zones.values():
                         z.controller.last_plan_ts = None
                 for z in zones:
@@ -1018,7 +1054,8 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.vac_active(now_ts) and not self.sofi_active(z) and not z.hvac_off:
             ret = self.return_at.timestamp()  # type: ignore[union-attr]
             if self.vac_setback is False and self.vac_frac is not None:
-                note = f"Urlaub: Absenken lohnt sich nicht (spart nur ~{100 * self.vac_frac:.0f} %), bleibt warm"
+                pct = int(1000 * self.vac_frac) / 10  # abgerundet: „~5 %“ bei 4,96 % wäre kein Grund fürs Warmhalten
+                note = f"Urlaub: Absenken lohnt sich nicht (spart nur {pct:.1f} %), bleibt warm".replace(".", ",")
             elif z.vac_preheating:
                 nxt = (ret, tg.setpoint, True)
             elif self.vac_setback and z.vac_preheat_ts is not None and (preheat_ts is None or z.vac_preheat_ts < preheat_ts):
@@ -1046,7 +1083,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             heating_limit=float(self.opts.get(CONF_HEATING_LIMIT, DEFAULT_HEATING_LIMIT)),
             heat_missing=heat_missing, master_on=self.master_on, hvac_off=z.hvac_off,
             learning_paused=paused, window_wait_until=self._window_wait_until(z, now_ts), sofi=self.sofi_active(z),
-            hand_until=self.hand_until(z, now_ts),
+            hand=self.hand_active(z, now_ts), hand_until=self.hand_until(z, now_ts),
             sensor_mode=z.controller.sensor_mode, sensor_last_ts=z.controller.last_ts, note=note,
         )
         z.explanation = explain(sit)
@@ -1074,7 +1111,7 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.vac_active(now_ts) and self.vac_setback is not None:
             info["urlaub"] = {
                 "absenken": self.vac_setback,
-                "ersparnis_prozent": round(100 * (self.vac_frac or 0.0)),
+                "ersparnis_prozent": round(100 * (self.vac_frac or 0.0), 1),
                 "ersparnis_kwh": round(self.vac_kwh or 0.0, 1),
                 "vorheizen_spaetestens": _when(z.vac_preheat_ts, now_ts) if self.vac_setback and z.vac_preheat_ts else None,
                 "heizt_vor": z.vac_preheating,

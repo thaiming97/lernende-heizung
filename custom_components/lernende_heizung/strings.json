@@ -160,6 +160,9 @@
       },
       "doors": {
         "name": "Doors open"
+      },
+      "vac_force": {
+        "name": "Vacation: allow setback"
       }
     },
     "select": {
@@ -257,7 +260,7 @@
           "kein_sensor": "Sensor missing",
           "sommer": "Summer",
           "beobachten": "Observe only",
-          "manuell": "Manual (until midnight)"
+          "manuell": "Manual"
         }
       },
       "saving": {

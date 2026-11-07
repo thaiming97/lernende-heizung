@@ -65,7 +65,7 @@ def _status(c, z) -> str | None:
     """Grund der Entscheidung – „manuell“, solange eine Einstellung von Hand gilt (sonst sähe es wie Automatik aus)."""
     if z.decision is None:
         return None
-    if z.decision.reason in ("komfort", "absenkung") and c.hand_until(z, time.time()) is not None:
+    if z.decision.reason in ("komfort", "absenkung") and c.hand_active(z, time.time()):
         return "manuell"
     return z.decision.reason
 

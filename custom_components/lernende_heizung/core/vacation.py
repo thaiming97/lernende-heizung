@@ -22,7 +22,7 @@ import math
 from .model import HeatingCurve, Inputs, ZoneParams, ZoneState, step, steady_heat_demand
 
 HEAT_RESERVE = 0.65  # Anteil der gelernten Heizwirkung, mit dem das Vorheizen gerechnet wird
-MIN_SAVING = 0.10  # absenken erst, wenn es so viel der Wärme fürs Warmhalten spart
+MIN_SAVING = 0.05  # absenken erst, wenn es so viel der Wärme fürs Warmhalten spart (bewusst vorsichtig gerechnet)
 STEP_H = 0.25
 MAX_DAYS = 60  # weiter rechnet niemand voraus (Urlaub mit Rückkehr in einem halben Jahr …)
 

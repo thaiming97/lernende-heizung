@@ -35,7 +35,8 @@ class Situation:
     learning_paused: str | None = None
     window_wait_until: float | None = None  # Fenster wieder zu, Ventil bleibt bis dahin zu
     sofi: bool = False  # Sofi-Modus gilt für diese Zone
-    hand_until: float | None = None  # von Hand eingestellt, gilt bis dahin
+    hand: bool = False  # von Hand eingestellt (Temperatur, „Heizen“, Preset)
+    hand_until: float | None = None  # … gilt bis dahin (None: bis auf Weiteres)
     sensor_mode: str | None = None  # Raumsensor fehlt: "halten" / "mittel" / "fest"
     sensor_last_ts: float | None = None  # letzter Raumwert
     note: str | None = None  # Vorsatz vor der Erklärung (z. B. Urlaub: Absenken lohnt sich nicht)
@@ -119,9 +120,12 @@ def explain(s: Situation) -> str:
             parts.append(f"Lernen pausiert: {s.learning_paused}.")
 
     text = " ".join(parts)
-    if s.hand_until is not None and r in ("komfort", "absenkung", "vorheizen", "beobachten", "rueckfall"):
-        hh = s.fmt_time(s.hand_until)
-        text = f"Von Hand bis {'0 Uhr' if hh == '00:00' else hh} – " + text
+    if (s.hand or s.hand_until is not None) and r in ("komfort", "absenkung", "vorheizen", "beobachten", "rueckfall"):
+        if s.hand_until is None:
+            text = "Von Hand bis auf Weiteres – " + text
+        else:
+            hh = s.fmt_time(s.hand_until)
+            text = f"Von Hand bis {'0 Uhr' if hh == '00:00' else hh} – " + text
     elif s.sofi and r in ("komfort", "absenkung", "vorheizen", "beobachten", "rueckfall"):
         text = "Sofi da – " + text
     elif s.note and r in ("komfort", "beobachten", "rueckfall"):

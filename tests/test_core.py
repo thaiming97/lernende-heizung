@@ -259,10 +259,17 @@ def test_vacation_setback_only_pays_off_when_long():
     plans = {h: _vac(h) for h in (12, 60, 168, 1000)}
     fracs = [plans[h].saving_frac for h in (12, 60, 168, 1000)]
     assert fracs == sorted(fracs)
-    assert not worth_it([plans[60]])[0]
-    assert worth_it([plans[1000]])[0]
+    assert not worth_it([plans[12]])[0]  # übers Wochenende-Ende / einen Tag: ein paar Prozent, nicht der Rede wert
+    assert worth_it([plans[60]])[0] and worth_it([plans[1000]])[0]
     assert all(pl.t_min >= 17.0 - 1e-9 for pl in plans.values())
     assert plans[1000].t_min < 18.0  # lange weg: kühlt bis zur Urlaubstemperatur
+
+
+def test_vacation_setback_worth_it_at_about_ten_percent():
+    """Felix: „10 % sparen ist doch gut“ – knapp unter 10 % (angezeigt als „~10 %“) darf nicht mehr ablehnen."""
+    pl = _vac(96)
+    assert 0.095 <= pl.saving_frac < 0.11
+    assert worth_it([pl]) == (True, pl.saving_frac, pl.saving_kwh)
 
 
 def test_vacation_preheat_start_is_latest_safe_start():

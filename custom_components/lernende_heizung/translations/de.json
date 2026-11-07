@@ -110,7 +110,8 @@
       "master": {"name": "Regelung"},
       "active": {"name": "Aktiv regeln"},
       "sofi": {"name": "Sofi da"},
-      "doors": {"name": "Türen offen"}
+      "doors": {"name": "Türen offen"},
+      "vac_force": {"name": "Urlaub: Absenken freigeben"}
     },
     "select": {
       "presence": {"name": "Anwesenheit", "state": {"zuhause": "Zuhause", "abwesend": "Abwesend", "urlaub": "Urlaub"}},
@@ -142,7 +143,7 @@
           "komfort": "Komfort", "absenkung": "Absenkung", "vorheizen": "Vorheizen", "fenster": "Fenster offen",
           "frostschutz": "Frostschutz", "aus": "Aus", "rueckfall": "Sicherheitsbetrieb", "kein_sensor": "Sensor fehlt",
           "sommer": "Sommer", "beobachten": "Nur beobachten",
-          "manuell": "Von Hand (bis 0 Uhr)"
+          "manuell": "Von Hand"
         }
       },
       "saving": {"name": "Einsparung durch Absenkung"},
