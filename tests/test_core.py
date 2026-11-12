@@ -526,6 +526,26 @@ def test_valve_gate():
     assert g.decide(2000 + 3700, 33) == 33  # kleine Restabweichung nach Beruhigung
 
 
+def test_valve_gate_hand_change_applies_at_once():
+    # Live 12.11.2026: Felix stellt den Wohnzimmer-Sollwert von Hand herunter, das Ventil blieb bei 50 %, weil nach dem
+    # letzten Befehl noch keine 20 min vergangen waren (nur ganz zu / ganz auf gehen sofort)
+    g = ValveGate()
+    assert g.decide(0, 50) == 50
+    assert g.decide(120, 33) is None  # automatisch: zu früh
+    assert g.decide(120, 33, immediate=True) == 33  # von Hand: gilt sofort, Schritt und Abstand egal
+    assert g.decide(240, 33, immediate=True) is None  # unverändert: kein Befehl, der den Motor weckt
+    assert g.decide(300, 32, immediate=True) is None  # 1 Punkt ist am Ventil nicht reproduzierbar
+
+
+def test_valve_gate_shorter_interval_when_room_far_off_band():
+    g = ValveGate()
+    assert g.decide(0, 50) == 50
+    assert g.decide(400, 30) is None  # im Band: 20 min Abstand
+    assert g.decide(100, 30, urgent=True) is None  # weit außerhalb, aber noch keine 5 min
+    assert g.decide(400, 30, urgent=True) == 30  # weit außerhalb: nach 5 min
+    assert g.decide(800, 26, urgent=True) is None  # auch dann nur ab 8 Punkten Änderung
+
+
 def test_trvzb_bump_on_close():
     assert trvzb_sequence(None, 40) == [40]
     assert trvzb_sequence(20, 40) == [40]

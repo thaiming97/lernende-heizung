@@ -6,7 +6,7 @@ from typing import Final
 
 DOMAIN: Final = "lernende_heizung"
 NAME: Final = "Lernende Heizung"
-VERSION: Final = "0.12.1"
+VERSION: Final = "0.12.2"
 
 PLATFORMS: Final = ["binary_sensor", "button", "climate", "datetime", "select", "sensor", "switch"]
 
@@ -59,6 +59,10 @@ DOORS_SETTLE_S: Final = 3600
 DOORS_NOTICE_S: Final = 12 * 3600  # so lange an → Hinweis „vergessen?“ (Lernen steht sonst still)
 EXT_TEMP_REFRESH_S: Final = 1800  # Raumtemperatur spätestens so oft an die Köpfe schicken, auch wenn gleich
 STARTUP_GRACE_S: Final = 600  # nach dem Start melden sich die Sensoren erst nach und nach
+# Raum weit außerhalb des Komfortbands (Band: 0,1 K unter bis 0,3 K über Soll; weit = weitere 0,3 K): Ventil darf dann
+# nach 5 statt 20 min nachgeführt werden (Batterieschutz bleibt sonst)
+VALVE_URGENT_ABOVE_K: Final = 0.6
+VALVE_URGENT_BELOW_K: Final = 0.4
 VACATION_REPLAN_S: Final = 3600  # Urlaub: so oft den spätesten Vorheizstart nachrechnen
 SENSOR_STALE_S: Final = 3 * 3600  # Raumsensor ohne Meldung → als ausgefallen behandeln
 SUPPLY_STALE_S: Final = 2 * 3600  # Vorlauffühler ohne Meldung → Wert nicht mehr verwenden

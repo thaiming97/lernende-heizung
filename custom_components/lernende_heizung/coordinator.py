@@ -73,6 +73,8 @@ from .const import (
     SEASON_WINTER,
     SENSOR_STALE_S,
     STARTUP_GRACE_S,
+    VALVE_URGENT_ABOVE_K,
+    VALVE_URGENT_BELOW_K,
     VACATION_REPLAN_S,
     SUPPLY_STALE_S,
     STORE_SAVE_DELAY_S,
@@ -199,6 +201,7 @@ class Zone:
     manual_until: float | None = None
     override: float | None = None  # Temperatur von Hand in Automatik
     override_until: float | None = None
+    hand_changed: bool = False  # Felix hat gerade etwas von Hand verstellt → Ventil beim nächsten Takt sofort stellen
     window_open: bool = False  # mindestens WINDOW_DELAY_S offen
     window_closed_ts: float | None = None  # danach bleibt das Ventil WINDOW_RESUME_S zu
     recover_to: float | None = None  # Raumtemperatur vor dem Lüften – so lange erholt sich die Luft noch
@@ -868,7 +871,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Ende der Fensterpause: sofort stellen, nicht erst nach dem Mindestabstand zwischen Ventilbefehlen
             resume = z.decision is not None and z.decision.reason == "fenster" and dec.reason != "fenster"
             z.decision = dec
-            await self._actuate(z, dec, now_ts, controlling, force=resume)
+            # Einstellung von Hand: sofort stellen, nicht erst nach dem Mindestabstand (gilt nur für diesen einen Takt)
+            immediate, z.hand_changed = z.hand_changed, False
+            await self._actuate(z, dec, now_ts, controlling, force=resume, immediate=immediate)
             await self._update_saving(z, now_ts, x)
             self._describe(z, now_ts, summer)
 
@@ -1167,7 +1172,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Sonntags 11 Uhr, wenn das Ventil seit über einer Woche zu war."""
         return local.weekday() == 6 and local.hour == 11 and local.minute < 10 and now_ts - z.last_open_ts > 7 * 86400
 
-    async def _actuate(self, z: Zone, dec: Decision, now_ts: float, controlling: bool, force: bool = False) -> None:
+    async def _actuate(
+        self, z: Zone, dec: Decision, now_ts: float, controlling: bool, force: bool = False, immediate: bool = False
+    ) -> None:
         if not controlling:
             if z.controlled:
                 for t in z.trvs:
@@ -1183,7 +1190,9 @@ class HeatingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         want = int(round(100 * dec.valve))
         first = not z.controlled
         force = force or first or dec.reason in ("fenster", "frostschutz")
-        sent = z.gate.decide(now_ts, want, force=force)
+        goal = self.target_at(z, now_ts).setpoint
+        urgent = z.temp is not None and (z.temp - goal > VALVE_URGENT_ABOVE_K or goal - z.temp > VALVE_URGENT_BELOW_K)
+        sent = z.gate.decide(now_ts, want, force=force, immediate=immediate, urgent=urgent)
         # bei Änderung, sonst spätestens alle 30 min (der Kopf soll den Fühler nicht für ausgefallen halten)
         send_ext = z.temp is not None and (
             z.last_ext_temp is None or abs(z.temp - z.last_ext_temp) >= 0.3 or now_ts - z.last_ext_ts >= EXT_TEMP_REFRESH_S

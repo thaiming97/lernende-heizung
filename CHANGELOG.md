@@ -4,6 +4,19 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.12.2 – 2026-11-12
+
+- **Was du von Hand verstellst, wirkt sofort am Ventil.** Bisher durfte ein Ventil nach einem Befehl erst nach
+  20 Minuten wieder verstellt werden (Batterieschutz) – auch wenn man gerade selbst den Sollwert, das Preset oder die
+  Betriebsart geändert hatte. Nur „ganz zu“ und „ganz auf“ gingen sofort. Am 12.11. wurde das Wohnzimmer von 21,75 auf
+  21,5 °C heruntergestellt, und das Ventil blieb bei 50 %, obwohl der Regler schon 33 % geplant hatte. Jetzt wird das
+  Ventil bei jeder Einstellung von Hand im selben Takt gestellt (Änderungen unter 2 Prozentpunkten weiterhin nicht,
+  die bewegen den Motor ohne Nutzen).
+- **Weit außerhalb des Bands: Ventil nach 5 statt 20 Minuten nachführen.** Liegt der Raum mehr als 0,3 K über oder
+  unter dem Komfortband (0,1 K unter bis 0,3 K über dem Soll), darf das Ventil schon nach 5 Minuten wieder verstellt
+  werden, wenn sich die Öffnung um mindestens 8 Prozentpunkte ändern soll. Im Normalbetrieb bleibt es bei 20 Minuten,
+  damit die Batterien lange halten.
+
 ## 0.12.1 – 2026-11-12
 
 - **Urlaub: Das Vorheizen rutscht nicht mehr nach hinten.** Im Urlaub rechnet die Heizung stündlich nach, wann sie

@@ -96,6 +96,7 @@ class ZoneClimate(ZoneEntity, ClimateEntity):
 
     async def _changed(self) -> None:
         self.zone.controller.last_plan_ts = None  # sofort neu planen
+        self.zone.hand_changed = True  # … und das Ventil sofort stellen (kein 20-min-Abstand für Handeingriffe)
         self.coordinator.schedule_save()
         await self.coordinator.async_refresh()
 

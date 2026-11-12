@@ -40,6 +40,7 @@ from custom_components.lernende_heizung.const import (
     SENSOR_STALE_S,
 )
 from custom_components.lernende_heizung.coordinator import _num
+from custom_components.lernende_heizung.core.controller import Decision
 from custom_components.lernende_heizung.diagnostics import async_get_config_entry_diagnostics
 
 ZONE = {
@@ -871,6 +872,91 @@ async def test_temperature_change_works_with_preset_and_presence(hass: HomeAssis
     await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 20.5}, blocking=True)
     await hass.async_block_till_done()
     assert hass.states.get(cid).attributes["temperature"] == 20.5
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+class _Planner:
+    """Feste Vorgabe der Reglerplanung (der echte Regler liefert im Test-Aufbau nur 0 % oder 100 %). Filter, Handeingriff
+    und Ventilbefehle bleiben echt – getestet wird die Verdrahtung zwischen Entscheidung und Ventil."""
+
+    def __init__(self, valve: float) -> None:
+        self.valve = valve
+
+    def __call__(self, *args, **kwargs) -> Decision:
+        return Decision(self.valve, self.valve, "komfort")
+
+
+async def _planned_zone(hass: HomeAssistant, valve: float, temp: str = "23.5"):
+    """Zone „Bad“ (Komfort 23,5 °C) im Regelbetrieb mit fester Planung; Ventil steht auf ``valve``."""
+    calls = async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)  # setzt den Fühler selbst auf 20,0 °C → erst danach den gewünschten Wert
+    hass.states.async_set("sensor.bad_temp", temp, {"unit_of_measurement": "°C", "device_class": "temperature"},
+                          force_update=True)
+    coord = entry.runtime_data
+    plan = _Planner(valve)
+    coord.zones["bad"].controller.decide = plan
+    await _activate(hass, entry)
+
+    def opening() -> list[float]:
+        return [c.data["value"] for c in calls if c.data["entity_id"] == "number.bad_valve_opening_degree"]
+
+    assert opening()[-1] == round(100 * valve)
+    calls.clear()
+    return entry, coord, plan, opening
+
+
+async def test_hand_change_moves_valve_at_once(hass: HomeAssistant, freezer) -> None:
+    """Live 12.11.2026: Felix stellt den Wohnzimmer-Sollwert von Hand herunter, das Ventil blieb bei 50 %, weil der
+    Abstand von 20 min zwischen zwei Ventilbefehlen auch für Handeingriffe galt (nur ganz zu / ganz auf gingen sofort)."""
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry, coord, plan, opening = await _planned_zone(hass, 0.60)
+        cid = _eid(hass, entry, "climate", "bad_climate")
+        freezer.tick(timedelta(seconds=60))  # weit unter dem Mindestabstand von 20 min
+        plan.valve = 0.37
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert opening() == []  # automatisch: Batterieschutz hält das Ventil (unverändert)
+        await hass.services.async_call("climate", "set_temperature", {"entity_id": cid, "temperature": 22.0}, blocking=True)
+        await hass.async_block_till_done()
+        assert opening()[-1] == 37  # von Hand: sofort (beim Schließen erst kurz weiter auf, dann Ziel)
+        # gilt nur für diesen einen Takt: danach schützt der Abstand wieder die Batterie
+        opened = len(opening())
+        freezer.tick(timedelta(seconds=60))
+        plan.valve = 0.20
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert len(opening()) == opened
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+@pytest.mark.parametrize(
+    ("near", "far", "valve"),
+    [
+        # Soll 23,5 °C, Komfortband 23,4 … 23,8 °C. Anstiege über ~0,45 K je 6 min hält der Fühlerfilter als Sonnenspitze
+        # fest → oben in zwei Schritten steigen lassen.
+        ("23.9", "24.3", 0.37),  # 0,4 K über Soll: nah am Band – 0,8 K über Soll: weit außerhalb (> 0,3 K über 23,8)
+        ("23.2", "23.0", 0.80),  # 0,3 K unter Soll: nah am Band – 0,5 K unter Soll: weit außerhalb (> 0,3 K unter 23,4)
+    ],
+)
+async def test_valve_follows_after_5_min_when_room_far_off_band(
+    hass: HomeAssistant, freezer, near: str, far: str, valve: float
+) -> None:
+    """Raum weit außerhalb des Komfortbands (mehr als 0,3 K jenseits der Grenzen): Ventil nach 5 statt 20 min nachführen."""
+    with patch.object(trv_mod, "BUMP_DELAY_S", 0):
+        entry, coord, plan, opening = await _planned_zone(hass, 0.60)
+
+        async def later(temp: str) -> None:
+            plan.valve = valve
+            freezer.tick(timedelta(seconds=360))  # mehr als 5, weniger als 20 min
+            hass.states.async_set("sensor.bad_temp", temp, {"unit_of_measurement": "°C", "device_class": "temperature"},
+                                  force_update=True)
+            await coord.async_refresh()
+            await hass.async_block_till_done()
+
+        await later(near)  # nah am Band → wartet auf die 20 min
+        assert opening() == []
+        await later(far)
+        assert opening()[-1] == round(100 * valve)
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
