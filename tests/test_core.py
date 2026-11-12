@@ -292,6 +292,44 @@ def test_vacation_preheat_start_is_latest_safe_start():
     assert end_temp(pl.preheat_ts + 6 * 3600) < 21.65
 
 
+def test_vacation_replanning_does_not_postpone_preheat():
+    """Der Coordinator rechnet den Vorheizstart stündlich mit dem ausgekühlten Raum nach. Das Ziel war dabei jedes Mal
+    „so warm, wie ab jetzt durchgeheizt“ – im kalten Raum sank es Stunde für Stunde und der Start rutschte mit (live
+    10.11.2026: Ziel Bad 22,2 statt 22,9, Wohnen 20,5 statt 21,65; Bad und Schlafen knapp 2 h zu spät). Jetzt gilt das
+    Ziel vom ersten Plan (Raum noch warm) weiter. Hier verhält sich die Wohnung genau so, wie der Planer rechnet –
+    dann muss es zur Rückkehr warm sein."""
+    ret, comfort, away, t_out = 168 * 3600.0, 21.75, 17.0, 0.0
+    heat = ZoneParams(**{**WOHNEN.to_dict(), "h": tuple(h * HEAT_RESERVE for h in WOHNEN.h)})
+    x = Inputs(t_out=t_out, t_supply=CURVE_LIVE.supply(t_out, 12))
+    s, ts, heating, preheat_ts, goal = ZoneState(21.75, 21.75, [0.0, 0.0, 0.0]), 0.0, False, None, None
+    while ts < ret:
+        if not heating and ts % 3600 == 0:  # wie VACATION_REPLAN_S, mit dem aktuellen Zustand
+            pl = plan_vacation(WOHNEN, s, CURVE_LIVE, lambda _ts: 12, ts, ret, comfort, away, lambda _ts: t_out, goal=goal)
+            preheat_ts, goal = pl.preheat_ts, pl.goal
+        heating = heating or ts >= preheat_ts
+        s = step(heat if heating else WOHNEN, s, x, 1.0 if heating else 0.0, 0.25, CURVE_LIVE)
+        s = ZoneState(min(comfort, max(away, s.t)), s.tm, s.q)
+        ts += 900
+    assert goal == pytest.approx(comfort - 0.1)
+    assert s.t >= goal - 0.05
+
+
+def test_vacation_starts_now_when_goal_is_out_of_reach():
+    """Reicht die Zeit bis zur Rückkehr für das festgelegte Ziel nicht mehr, heizt die Zone sofort."""
+    cold = ZoneState(19.0, 19.5, [0.0, 0.0, 0.0])
+    pl = plan_vacation(WOHNEN, cold, CURVE_LIVE, lambda _ts: 12, 1000.0, 1000.0 + 6 * 3600, 21.75, 17.0, lambda _ts: 0.0,
+                       goal=21.65)
+    assert pl.preheat_ts == 1000.0 and pl.goal == pytest.approx(21.65)
+
+
+def test_vacation_goal_never_above_comfort():
+    """Komforttemperatur im Urlaub gesenkt (Einstellung, Sofi aus): ein älteres, höheres Ziel gilt nicht weiter –
+    sonst wäre es unerreichbar und die Zone heizte ab sofort bis zur Rückkehr."""
+    warm = ZoneState(21.0, 21.0, [0.0, 0.0, 0.0])
+    pl = plan_vacation(WOHNEN, warm, CURVE_LIVE, lambda _ts: 12, 0.0, 1000 * 3600, 21.0, 17.0, lambda _ts: 8.0, goal=21.65)
+    assert pl.goal == pytest.approx(20.9) and pl.preheat_ts > 0.0
+
+
 def test_fallback_when_model_fails():
     c = ZoneController(ZoneParams())
     x = Inputs(t_out=0.0)

@@ -33,6 +33,7 @@ class VacationPlan:
     keep_kwh: float  # Wärme fürs Warmhalten bis zur Rückkehr
     preheat_ts: float  # spätester Start mit voller Leistung (= Rückkehr, wenn keins nötig)
     t_min: float  # tiefste Raumtemperatur bis dahin
+    goal: float  # so warm muss es zur Rückkehr sein (beim Nachrechnen wieder übergeben)
 
     @property
     def saving_frac(self) -> float:
@@ -50,7 +51,9 @@ def plan_vacation(
     away: float,
     t_out_at: Callable[[float], float],
     band: float = 0.1,
+    goal: float | None = None,
 ) -> VacationPlan:
+    """goal: Ziel aus dem ersten Plan dieser Rückkehrzeit (None = jetzt festlegen), siehe unten."""
     dt = STEP_H
     n = max(0, min(int(math.ceil((return_ts - now_ts) / 3600 / dt)), int(MAX_DAYS * 24 / dt)))
     times = [now_ts + k * dt * 3600 for k in range(n)]
@@ -83,8 +86,15 @@ def plan_vacation(
 
     # Warm halten = durchheizen. Nachts schafft der Kessel (Absenkung) manchmal nicht ganz die Komforttemperatur
     # (Wohnen live 21,1–21,5 bei 100 %) – zur Rückkehr muss es so warm sein, wie es durchgeheizt wäre.
+    # Festgelegt wird das Ziel einmal, beim Eintragen der Rückkehr (Raum noch warm). Beim stündlichen Nachrechnen ist
+    # der Raum ausgekühlt; „ab jetzt durchheizen“ schafft die Komforttemperatur dann nicht mehr – neu abgeleitet sank
+    # das Ziel Stunde für Stunde und der Start rutschte mit (live 10.11.2026: Bad 22,2 statt 22,9, Bad und Schlafen
+    # knapp 2 h zu spät warm). Reicht die Zeit für das festgelegte Ziel nicht mehr, heißt das: sofort heizen.
     keep_path = heat_from(0)
-    goal = min(comfort, keep_path[-1] if keep_path else s.t) - band
+    if goal is None:
+        goal = min(comfort, keep_path[-1] if keep_path else s.t) - band
+    else:  # Komforttemperatur inzwischen gesenkt: das ältere, höhere Ziel wäre unerreichbar
+        goal = min(goal, comfort - band)
 
     def warm_at_return(k0: int) -> bool:
         path = heat_from(k0)
@@ -110,6 +120,7 @@ def plan_vacation(
         keep_kwh=keep,
         preheat_ts=now_ts + k_start * dt * 3600 if k_start < n else return_ts,
         t_min=min([s.t, *temps]),
+        goal=goal,
     )
 
 

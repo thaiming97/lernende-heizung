@@ -513,6 +513,8 @@ async def test_preset_ends_manual_heat_mode(hass: HomeAssistant) -> None:
 async def test_temperature_change_lasts_without_schedule_change(hass: HomeAssistant, freezer) -> None:
     """Zeitplan „immer“: Es gibt keinen Wechsel, an dem die Änderung enden könnte – vorher fiel sie nach
     4 h stillschweigend zurück. Jetzt bleibt sie (auch über einen Neustart) bis Preset/Modus/Anwesenheit."""
+    freezer.move_to(dt_util.start_of_local_day() + timedelta(hours=9))  # die Änderung gilt bis 0 Uhr – abends gestartet
+    # lief der Test über Mitternacht und schlug fehl (je nach Uhrzeit des Testlaufs)
     async_mock_service(hass, "number", "set_value")
     entry = await _setup(hass)
     cid = _eid(hass, entry, "climate", "bad_climate")
@@ -959,6 +961,41 @@ async def test_vacation_with_and_without_return(hass: HomeAssistant, freezer) ->
     await hass.async_block_till_done()
     assert coord.presence == "zuhause" and coord.vac_setback is None and not zone.vac_preheating
     assert hass.states.get(cid).attributes["temperature"] == 23.5
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_vacation_goal_stays_when_room_has_cooled(hass: HomeAssistant, freezer) -> None:
+    """Das Ziel fürs Vorheizen wird beim Eintragen der Rückkehr festgelegt und gilt beim stündlichen Nachrechnen
+    weiter. Vorher leitete jede Nachrechnung es neu aus „ab jetzt durchheizen“ ab: Im ausgekühlten Raum sank es mit,
+    und der Start rutschte nach hinten (live 10.11.2026). Schafft der Raum das Ziel nicht mehr rechtzeitig → sofort."""
+    async_mock_service(hass, "number", "set_value")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    zone = coord.zones["bad"]
+    for _ in range(2):  # Bad ist warm
+        await _air(hass, freezer, coord, 1800, 23.5)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": _eid(hass, entry, "switch", "vac_force")}, blocking=True)
+    await hass.services.async_call("select", "select_option",
+                                   {"entity_id": _eid(hass, entry, "select", "presence"), "option": "urlaub"}, blocking=True)
+    await hass.services.async_call("datetime", "set_value", {"entity_id": _eid(hass, entry, "datetime", "return_at"),
+                                                             "datetime": dt_util.utcnow() + timedelta(hours=8)}, blocking=True)
+    await hass.async_block_till_done()
+    assert coord.vac_setback is True and not zone.vac_preheating
+    assert zone.vac_preheat_ts is not None and zone.vac_preheat_ts > time.time()
+    # Das Bad kühlt aus. Nachgerechnet wird stündlich und vor dem Einlesen der Raumtemperatur, der Messwert aus _air
+    # zählt erst im Takt danach – die ersten beiden Nachrechnungen sehen also noch den warmen Raum.
+    for _ in range(2):
+        await _air(hass, freezer, coord, 3700, 18.0)
+        assert not zone.vac_preheating
+    await _air(hass, freezer, coord, 3700, 18.0)
+    assert zone.vac_preheating  # schafft das Ziel bis zur Rückkehr nicht mehr → heizt sofort, statt das Ziel zu senken
+    assert zone.vac_goal is not None and zone.vac_goal > 22.0
+    assert coord._export()["zones"]["bad"]["vac_goal"] == zone.vac_goal  # übersteht einen Neustart
+    # neue Rückkehrzeit: neues Ziel
+    await hass.services.async_call("datetime", "set_value", {"entity_id": _eid(hass, entry, "datetime", "return_at"),
+                                                             "datetime": dt_util.utcnow() + timedelta(days=30)}, blocking=True)
+    await hass.async_block_till_done()
+    assert not zone.vac_preheating and zone.vac_goal == pytest.approx(23.4)
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 

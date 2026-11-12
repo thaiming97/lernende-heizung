@@ -4,6 +4,18 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.12.1 – 2026-11-12
+
+- **Urlaub: Das Vorheizen rutscht nicht mehr nach hinten.** Im Urlaub rechnet die Heizung stündlich nach, wann sie
+  spätestens vorheizen muss. Als Ziel nahm sie dabei „so warm, wie ich es ab jetzt noch schaffe“. In der
+  ausgekühlten Wohnung sank dieses Ziel Stunde für Stunde, und der Start verschob sich mit: Am 10.11. waren Bad und
+  Schlafzimmer zur eingetragenen Rückkehr noch 0,4 °C zu kühl und erst knapp 2 Stunden später warm. Jetzt wird das
+  Ziel einmal festgelegt, wenn du die Rückkehr einträgst (der Raum ist dann noch warm), und gilt bis zur Rückkehr.
+  Reicht die Zeit dafür nicht mehr, heizt die Zone sofort. Eine geänderte Rückkehrzeit legt das Ziel neu fest.
+  Folge: Nach dem Urlaub ist es pünktlich warm, dafür beginnt das Vorheizen deutlich früher als bisher
+  (nachgerechnet mit den Messwerten vom 10.11.: Schlafen rund 9 Stunden, Bad 17 Stunden, Wohnen 25 Stunden vor der
+  Rückkehr statt 5–7 Stunden).
+
 ## 0.12.0 – 2026-11-07
 
 - **Nur die verstellte Temperatur geht um 0 Uhr zurück.** Bisher endete alles von Hand – auch „Heizen“ und die

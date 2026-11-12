@@ -54,6 +54,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Heating
         "urlaub": {"rueckkehr": c.return_at.isoformat() if c.return_at else None, "absenken": c.vac_setback,
                    "ersparnis_anteil": c.vac_frac, "ersparnis_kwh": c.vac_kwh,
                    "vorheizen_ab": {zid: z.vac_preheat_ts for zid, z in c.zones.items()},
+                   "ziel": {zid: z.vac_goal for zid, z in c.zones.items()},
                    "heizt_vor": {zid: z.vac_preheating for zid, z in c.zones.items()}},
         "heizsaison": c.season,
         "heizperiode": c.heating_season,
