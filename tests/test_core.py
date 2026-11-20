@@ -245,6 +245,21 @@ def test_plan_disturbance_fades():
     assert rises[0] < 1.0 < 2.0 < rises[1]
 
 
+def test_plan_closes_when_room_slightly_too_warm():
+    """Live 13.–20.11.: Wohnen stand stundenlang bei 22,0 °C (Soll 21,75) mit 15–25 % Ventil, weil bis Soll + 0,3 K
+    nichts kostete. Jetzt: schon ab Soll + 0,1 K zu, bis der Raum wieder ans Soll fällt."""
+    p = ZoneParams(k_am=0.075, k_ma=0.04, k_n=0.001, k_o=0.006, h=(5.8,) * 3, valve_exp=0.35, c_eff_kwh_per_k=2.1)
+    x = Inputs(t_out=5.0, t_nbr=21.0)
+    c = ZoneController(p)
+    c.observe(0.0, 22.0, x, 0.2)
+    c.u_eff = 0.2
+    c.state.tm = 22.0  # warme Wände: ohne Heizen fällt der Raum nur langsam
+    plan = c.make_plan(0.0, x, lambda _t: Target(21.75, True), lambda _t: 5.0, lambda _t: NO_SUN)
+    assert plan.u[:4].max() < 0.02  # alte Werte (Band 0,3 / Strafe 6): 15 → 6 %
+    assert plan.t_pred[8] < 21.85  # nach 2 h nah am Soll (alt: 21,98)
+    assert plan.t_pred.min() > 21.6  # aber nicht unter das Band
+
+
 WOHNEN = ZoneParams(k_am=0.075, k_ma=0.04, k_n=0.001, k_o=0.006, h=(5.8, 5.8, 5.8), valve_exp=0.35, c_eff_kwh_per_k=2.1)
 CURVE_LIVE = HeatingCurve(tvl_at_m10=37.0, tvl_at_p15=30.0)
 

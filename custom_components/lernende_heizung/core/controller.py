@@ -59,12 +59,12 @@ class ControllerConfig:
     # Stellgrößen-Blöcke: 16×15 min, dann 30-min-Blöcke
     fine_steps: int = 16
     w_low: float = 30.0  # Strafe je K² Unterschreitung und Schritt
-    w_high: float = 6.0  # Strafe je K² Überschwingen in Komfortzeit
+    w_high: float = 20.0  # Strafe je K² Überschwingen in Komfortzeit (0.12.3: 6 → 20)
     w_energy: float = 0.05  # je K/h Heizwirkung und Schritt
     w_smooth: float = 1.0  # Ventilruhe (schont Batterie/Motor)
     w_warm: float = 0.0  # je K über Soll außerhalb der Komfortzeit; >0 heizt später/kräftiger (spart ~3 %, mehr Überschwingen)
     band_low: float = 0.1  # K unter Soll noch ok
-    band_high: float = 0.3  # K über Soll noch ok (Komfortzeit)
+    band_high: float = 0.1  # K über Soll noch ok (Komfortzeit; 0.12.3: 0,3 → 0,1, sonst blieb Wohnen bei +0,3 K und Ventil 15–25 %)
     obs_gain: float = 0.6  # 1/h: Anpassgeschwindigkeit der Störgröße
     obs_limit: float = 0.6  # K/h
     d_tau_h: float = 2.0  # h: so schnell klingt die kurzfristige Störgröße im Plan ab

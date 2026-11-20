@@ -4,6 +4,15 @@ Jede Version bekommt hier einen Abschnitt `## x.y.z – Datum`. Wird die Version
 `manifest.json` erhöht und nach `main` gepusht, legt GitHub automatisch ein Release mit
 diesem Abschnitt als Beschreibung an (HACS zeigt ihn beim Update an).
 
+## 0.12.3 – 2026-11-20
+
+- **Nicht mehr „ein bisschen zu warm“.** Bisher galt alles bis 0,3 K über dem Soll als in Ordnung und kostete den
+  Regler nichts. Das Wohnzimmer stand deshalb oft stundenlang bei 22,0–22,1 °C (Soll 21,75), und das Ventil blieb
+  dabei bei 15–25 % offen. Jetzt zählt „zu warm“ schon ab 0,1 K über dem Soll, und es wird stärker vermieden
+  (Strafe 20 statt 6). Folge: Ist der Raum etwas zu warm, macht das Ventil zu, bis er wieder ans Soll fällt. Die
+  Untergrenze (0,1 K unter dem Soll) bleibt unverändert, es wird also nicht kälter. In der Simulation (Dez–Feb)
+  ändern sich Verbrauch, Genauigkeit und Zahl der Ventilbefehle nicht spürbar.
+
 ## 0.12.2 – 2026-11-12
 
 - **Was du von Hand verstellst, wirkt sofort am Ventil.** Bisher durfte ein Ventil nach einem Befehl erst nach
